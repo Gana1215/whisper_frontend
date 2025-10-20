@@ -1,0 +1,8 @@
+# Node.js / React project ignores
+node_modules
+dist
+.env
+.DS_Store
+.vscode
+*.log
+
