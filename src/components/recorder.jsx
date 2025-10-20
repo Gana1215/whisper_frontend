@@ -7,6 +7,7 @@ export default function Recorder({ onStop }) {
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const [animationId, setAnimationId] = useState(null);
+  const audioCtxRef = useRef(null);
 
   const startRecording = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -14,16 +15,13 @@ export default function Recorder({ onStop }) {
 
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const audioCtx = new AudioCtx();
+    audioCtxRef.current = audioCtx;
 
     const source = audioCtx.createMediaStreamSource(stream);
     const analyser = audioCtx.createAnalyser();
-    const gainNode = audioCtx.createGain();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
 
-    analyser.fftSize = 1024; // smoother lines
-    source.connect(gainNode);
-    gainNode.connect(analyser);
-
-    gainNode.gain.value = 6.0; // 🔊 sensitivity boost
     mediaRecorderRef.current = recorder;
     setRecording(true);
 
@@ -37,7 +35,7 @@ export default function Recorder({ onStop }) {
     };
 
     recorder.start();
-    visualize(analyser, audioCtx);
+    visualize(analyser);
   };
 
   const stopRecording = () => {
@@ -48,41 +46,40 @@ export default function Recorder({ onStop }) {
     cancelAnimationFrame(animationId);
   };
 
-  // 🎨 Gradient + intensity-sensitive waveform
-  const visualize = (analyser, audioCtx) => {
+  const visualize = (analyser) => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
-    const bufferLength = analyser.frequencyBinCount;
+    const bufferLength = analyser.fftSize;
     const dataArray = new Uint8Array(bufferLength);
+
+    let dynamicGain = 1.0;
 
     const draw = () => {
       analyser.getByteTimeDomainData(dataArray);
-
-      // Compute current volume
-      const avgAmplitude =
-        dataArray.reduce((sum, val) => sum + Math.abs(val - 128), 0) /
+      const avgAmp =
+        dataArray.reduce((sum, v) => sum + Math.abs(v - 128), 0) /
         bufferLength;
-      const intensity = Math.min(avgAmplitude / 64, 1); // normalize 0-1
-
-      // Create gradient based on voice intensity
-      const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
-      gradient.addColorStop(0, `hsl(${260 - 60 * intensity}, 80%, 65%)`);
-      gradient.addColorStop(0.5, `hsl(${300 - 80 * intensity}, 80%, 70%)`);
-      gradient.addColorStop(1, `hsl(${330 - 50 * intensity}, 90%, 75%)`);
+      const targetGain = Math.min(8.0 / (avgAmp + 1), 8.0);
+      dynamicGain += (targetGain - dynamicGain) * 0.05;
 
       ctx.fillStyle = "#f9fafb";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
+      grad.addColorStop(0, "#4f46e5");
+      grad.addColorStop(0.5, "#7e22ce");
+      grad.addColorStop(1, "#db2777");
+
       ctx.lineWidth = 3;
-      ctx.strokeStyle = gradient;
+      ctx.strokeStyle = grad;
       ctx.beginPath();
 
       const sliceWidth = canvas.width / bufferLength;
       let x = 0;
       for (let i = 0; i < bufferLength; i++) {
         const v = (dataArray[i] - 128) / 128.0;
-        const y = canvas.height / 2 + v * (canvas.height * 0.9);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const y = canvas.height / 2 + v * (canvas.height / 2.0) * dynamicGain;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         x += sliceWidth;
       }
       ctx.lineTo(canvas.width, canvas.height / 2);
@@ -93,14 +90,26 @@ export default function Recorder({ onStop }) {
     draw();
   };
 
-  const handlePlay = () => {
-    const audio = document.querySelector("audio");
-    if (audio) {
-      audio.play().catch(() => {
-        const fresh = audio.cloneNode(true);
-        audio.replaceWith(fresh);
-        fresh.play().catch(() => {});
+  // ✅ Full iPhone playback fix
+  const handlePlay = async () => {
+    try {
+      // Resume AudioContext if suspended (iPhone Chrome/Safari quirk)
+      if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+        await audioCtxRef.current.resume();
+      }
+
+      const audio = document.querySelector("audio");
+      if (!audio) return;
+
+      // Ensure play happens only from user gesture
+      await audio.play().catch(() => {
+        // fallback: recreate and trigger in a gesture
+        const newAudio = audio.cloneNode(true);
+        audio.replaceWith(newAudio);
+        newAudio.play().catch(() => {});
       });
+    } catch (e) {
+      console.warn("Playback issue:", e);
     }
   };
 
@@ -110,7 +119,7 @@ export default function Recorder({ onStop }) {
         ref={canvasRef}
         width="500"
         height="120"
-        className="rounded-lg shadow-lg bg-gray-50"
+        className="rounded-lg shadow-md bg-gray-50"
       ></canvas>
 
       <div className="flex space-x-4 mt-2">
@@ -138,7 +147,7 @@ export default function Recorder({ onStop }) {
             src={audioUrl}
             controls
             playsInline
-            preload="none"
+            preload="auto"
             className="w-full rounded-lg"
           />
           <button
@@ -152,3 +161,5 @@ export default function Recorder({ onStop }) {
     </div>
   );
 }
+
+// FIXED 
