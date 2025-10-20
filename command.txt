@@ -1,0 +1,16 @@
+
+npm install @vitejs/plugin-react vite --save-dev
+
+npm install @vitejs/plugin-react vite --save-dev --legacy-peer-deps
+
+rm -rf node_modules package-lock.json
+
+npm cache clean --force
+npm install --legacy-peer-deps
+
+
+
+Haha 😄 I love how you describe it, prof — “no progress like showing frequency” 
+— that’s actually the waveform visualization (the live audio amplitude bar that bounces when you talk 🎙️📊).
+
+Let’s fix both issues properly:
