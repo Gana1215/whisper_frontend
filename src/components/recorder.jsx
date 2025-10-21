@@ -1,138 +1,131 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 
 export default function Recorder({ onStop }) {
   const [recording, setRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
-  const [ready, setReady] = useState(false);
   const canvasRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
-  const [animationId, setAnimationId] = useState(null);
-
-  // iOS-safe AudioContext (keeps alive across taps)
+  const animationRef = useRef(null);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
 
-  const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
-
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const audioCtx =
-      audioCtxRef.current || new AudioCtx({ latencyHint: "interactive" });
-    audioCtxRef.current = audioCtx;
-
-    const source = audioCtx.createMediaStreamSource(stream);
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    source.connect(analyser);
-    analyserRef.current = analyser;
-
-    mediaRecorderRef.current = recorder;
-    setRecording(true);
-    setReady(false);
-
-    recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
-    recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-      chunksRef.current = [];
-      const url = URL.createObjectURL(blob);
-      setAudioUrl(url);
-      setReady(true);
-      if (onStop) onStop({ blob, url });
+  // 🔓 iOS unlock for AudioContext + mic permission
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (!audioCtxRef.current) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        audioCtxRef.current = new AudioCtx({ latencyHint: "interactive" });
+      }
+      if (audioCtxRef.current.state === "suspended") {
+        audioCtxRef.current.resume();
+      }
     };
+    document.addEventListener("touchstart", unlockAudio, { once: true });
+    document.addEventListener("touchend", unlockAudio, { once: true });
+    return () => {
+      document.removeEventListener("touchstart", unlockAudio);
+      document.removeEventListener("touchend", unlockAudio);
+    };
+  }, []);
 
-    recorder.start();
-    visualize();
+  // 🎙️ Start recording
+  const startRecording = async () => {
+    try {
+      // ✅ Use {mimeType: "audio/webm"} if supported, otherwise fallback
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm"
+        : "audio/mp4";
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const audioCtx =
+        audioCtxRef.current || new AudioCtx({ latencyHint: "interactive" });
+      audioCtxRef.current = audioCtx;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      chunksRef.current = [];
+      setRecording(true);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        setAudioUrl(url);
+        if (onStop) onStop({ blob, url });
+        stream.getTracks().forEach((t) => t.stop());
+        cancelAnimationFrame(animationRef.current);
+      };
+
+      recorder.start(100); // small timeslice improves iOS reliability
+      drawWaveform();
+    } catch (err) {
+      console.error("Recording error:", err);
+      alert("🎤 Microphone permission or browser not supported.");
+    }
   };
 
+  // ⏹️ Stop recording
   const stopRecording = () => {
     setRecording(false);
     if (mediaRecorderRef.current?.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
-    cancelAnimationFrame(animationId);
   };
 
-  // 🔊 Dynamically scale waveform intensity
-  const visualize = () => {
-    const analyser = analyserRef.current;
+  // 🎨 Draw waveform (boosted for sensitivity)
+  const drawWaveform = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
+    const analyser = analyserRef.current;
     const bufferLength = analyser.fftSize;
     const dataArray = new Uint8Array(bufferLength);
-    let gain = 1.0;
 
     const draw = () => {
       analyser.getByteTimeDomainData(dataArray);
-      const avg =
-        dataArray.reduce((sum, v) => sum + Math.abs(v - 128), 0) /
-        bufferLength;
-      const target = Math.min(6 / (avg + 1), 6);
-      gain += (target - gain) * 0.1;
-
-      ctx.fillStyle = "#fafafa";
+      ctx.fillStyle = "#f9fafb";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
-      grad.addColorStop(0, "#4f46e5");
-      grad.addColorStop(0.5, "#9333ea");
-      grad.addColorStop(1, "#ec4899");
-
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = grad;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#4f46e5";
       ctx.beginPath();
 
-      const sliceWidth = canvas.width / bufferLength;
+      const sliceWidth = (canvas.width * 1.0) / bufferLength;
       let x = 0;
 
       for (let i = 0; i < bufferLength; i++) {
         const v = (dataArray[i] - 128) / 128;
-        const y = canvas.height / 2 + v * canvas.height * 0.4 * gain;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        const amplified = v * 5.5; // Sensitivity multiplier (was 4)
+        const y = canvas.height / 2 + amplified * (canvas.height / 2);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
         x += sliceWidth;
       }
 
       ctx.lineTo(canvas.width, canvas.height / 2);
       ctx.stroke();
-
-      setAnimationId(requestAnimationFrame(draw));
+      animationRef.current = requestAnimationFrame(draw);
     };
     draw();
   };
 
-  // ✅ iPhone playback-safe handler
-  const handlePlay = async () => {
+  // ▶️ Safe playback on iOS (user gesture required)
+  const playRecording = () => {
     if (!audioUrl) return;
-
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const ctx =
-      audioCtxRef.current ||
-      new AudioCtx({ sampleRate: 44100, latencyHint: "interactive" });
-    audioCtxRef.current = ctx;
-
-    if (ctx.state === "suspended") {
-      await ctx.resume();
-    }
-
-    // Force gesture-based play with a new audio element
     const audio = new Audio(audioUrl);
-    audio.playsInline = true;
-    audio.autoplay = true;
-    audio.preload = "auto";
-
-    try {
-      await audio.play();
-    } catch (err) {
-      console.warn("iPhone playback blocked, retrying...", err);
-      document.body.addEventListener(
-        "touchend",
-        () => {
-          audio.play().catch(() => {});
-        },
-        { once: true }
-      );
-    }
+    audio.play().catch(() => {
+      alert("🔊 Tap again to allow playback (iOS requires interaction).");
+    });
   };
 
   return (
@@ -140,7 +133,7 @@ export default function Recorder({ onStop }) {
       <canvas
         ref={canvasRef}
         width="500"
-        height="120"
+        height="100"
         className="rounded-lg shadow-md bg-gray-50"
       ></canvas>
 
@@ -162,15 +155,13 @@ export default function Recorder({ onStop }) {
         )}
       </div>
 
-      {ready && (
-        <div className="flex flex-col items-center mt-4 space-y-2">
-          <button
-            onClick={handlePlay}
-            className="px-5 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg text-sm"
-          >
-            ▶️ Play Recording
-          </button>
-        </div>
+      {audioUrl && (
+        <button
+          onClick={playRecording}
+          className="px-6 py-3 bg-green-500 text-white rounded-full shadow hover:bg-green-600 transition"
+        >
+          ▶️ Play Recording
+        </button>
       )}
     </div>
   );
