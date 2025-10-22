@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { ReactMic } from "react-mic";
 
@@ -6,14 +6,13 @@ const API_URL = "https://wstt-demo.onrender.com/transcribe";
 
 export default function App() {
   const [recording, setRecording] = useState(false);
-  const [blobURL, setBlobURL] = useState(null);
   const [transcript, setTranscript] = useState("");
-  const [playbackURL, setPlaybackURL] = useState("");
+  const [audioSrc, setAudioSrc] = useState(null);
   const [loading, setLoading] = useState(false);
   const [device, setDevice] = useState("unknown");
 
-  // Detect device type (mobile vs desktop)
-  React.useEffect(() => {
+  // Detect device type
+  useEffect(() => {
     const isMobile = /Mobi|Android/i.test(navigator.userAgent);
     setDevice(isMobile ? "mobile" : "desktop");
   }, []);
@@ -22,55 +21,36 @@ export default function App() {
   const stopRecording = () => setRecording(false);
 
   const onStop = async (recordedBlob) => {
-    console.log("🎤 Recorded blob:", recordedBlob);
-    setBlobURL(recordedBlob.blobURL);
-    await sendAudio(recordedBlob.blob);
+    console.log("🎤 Recorded:", recordedBlob);
+    await sendAudio(recordedBlob.blob, recordedBlob.device);
   };
 
-  const sendAudio = async (blob) => {
+  const sendAudio = async (blob, deviceType = device) => {
     setLoading(true);
     const formData = new FormData();
     formData.append("file", blob, "recording.wav");
-    formData.append("device", device);
+    formData.append("device", deviceType);
 
     try {
       const res = await axios.post(API_URL, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-
       console.log("✅ Backend response:", res.data);
 
-      // Handle new backend JSON schema
-      const {
-        user_text,
-        playback_path,
-        language,
-        duration_sec,
-        time_ms,
-      } = res.data;
+      // Simplified handling
+      const { user_text, playback_path } = res.data;
+      setTranscript(user_text || "No text recognized.");
 
-      setTranscript(
-        user_text
-          ? `📝 ${user_text}\n\n🌐 Language: ${language}\n🎧 Duration: ${duration_sec.toFixed(
-              2
-            )}s\n⚡ Processing: ${time_ms.toFixed(1)} ms`
-          : "No text recognized."
-      );
-
-      // Handle playback (if backend provides a path)
       if (playback_path) {
-        const fullPlaybackURL = `${API_URL.replace(
-          "/transcribe",
-          ""
-        )}${playback_path}`;
-        setPlaybackURL(fullPlaybackURL);
+        const fullURL = `${API_URL.replace("/transcribe", "")}${playback_path}`;
+        setAudioSrc(fullURL);
       } else {
-        setPlaybackURL("");
+        setAudioSrc(URL.createObjectURL(blob));
       }
     } catch (err) {
       console.error("❌ Transcription error:", err);
-      setTranscript("Transcription failed. Please try again.");
-      setPlaybackURL("");
+      setTranscript("Transcription failed.");
+      setAudioSrc(null);
     } finally {
       setLoading(false);
     }
@@ -85,9 +65,9 @@ export default function App() {
       <ReactMic
         record={recording}
         className="w-80"
-        onStop={onStop}
         strokeColor="#0ea5e9"
         backgroundColor="#e0f2fe"
+        onStop={onStop}
       />
 
       <div className="mt-5">
@@ -108,24 +88,14 @@ export default function App() {
         )}
       </div>
 
-      {/* Local playback of recorded audio */}
-      {blobURL && (
+      {/* 🎵 Single player — only backend playback */}
+      {audioSrc && (
         <audio
-          src={blobURL}
+          src={audioSrc}
           controls
           playsInline
-          className="mt-6 border-2 border-blue-300 rounded-xl shadow-md"
-        />
-      )}
-
-      {/* Playback from backend (TTS or processed WAV) */}
-      {playbackURL && (
-        <audio
-          src={playbackURL}
-          controls
-          playsInline
-          autoPlay
-          className="mt-6 border-2 border-green-300 rounded-xl shadow-md"
+          autoPlay={device === "desktop"}
+          className="mt-6 border-2 border-blue-300 rounded-xl shadow-md w-72 sm:w-96"
         />
       )}
 
@@ -134,16 +104,12 @@ export default function App() {
           <p className="text-blue-700 animate-pulse">⏳ Transcribing...</p>
         ) : (
           transcript && (
-            <pre className="bg-white p-4 rounded-xl shadow text-gray-700 whitespace-pre-wrap">
+            <p className="bg-white p-4 rounded-xl shadow text-gray-700 whitespace-pre-wrap">
               {transcript}
-            </pre>
+            </p>
           )
         )}
       </div>
-
-      <p className="text-xs text-gray-500 mt-4">
-        Device: {device} | API: {API_URL}
-      </p>
     </div>
   );
 }

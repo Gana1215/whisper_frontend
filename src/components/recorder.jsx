@@ -3,6 +3,7 @@ import React, { useRef, useState, useEffect } from "react";
 export default function Recorder({ onStop }) {
   const [recording, setRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
+  const [device, setDevice] = useState("unknown");
   const canvasRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -10,7 +11,13 @@ export default function Recorder({ onStop }) {
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
 
-  // 🔓 iOS unlock for AudioContext + mic permission
+  // 🧭 Detect browser / device type
+  useEffect(() => {
+    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+    setDevice(isMobile ? "mobile" : "desktop");
+  }, []);
+
+  // 🔓 Unlock AudioContext on iOS
   useEffect(() => {
     const unlockAudio = () => {
       if (!audioCtxRef.current) {
@@ -32,7 +39,6 @@ export default function Recorder({ onStop }) {
   // 🎙️ Start recording
   const startRecording = async () => {
     try {
-      // ✅ Use {mimeType: "audio/webm"} if supported, otherwise fallback
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm"
         : "audio/mp4";
@@ -63,12 +69,24 @@ export default function Recorder({ onStop }) {
         const blob = new Blob(chunksRef.current, { type: mimeType });
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
-        if (onStop) onStop({ blob, url });
+
+        if (onStop) onStop({ blob, url, device });
+
+        // 💻 Desktop: auto playback for instant feedback
+        if (device === "desktop") {
+          const autoAudio = new Audio(url);
+          autoAudio.playsInline = true;
+          autoAudio.play().catch((err) =>
+            console.warn("Auto-play blocked:", err)
+          );
+        }
+
+        // 🧹 Cleanup
         stream.getTracks().forEach((t) => t.stop());
         cancelAnimationFrame(animationRef.current);
       };
 
-      recorder.start(100); // small timeslice improves iOS reliability
+      recorder.start(100);
       drawWaveform();
     } catch (err) {
       console.error("Recording error:", err);
@@ -84,7 +102,7 @@ export default function Recorder({ onStop }) {
     }
   };
 
-  // 🎨 Draw waveform (boosted for sensitivity)
+  // 🎨 Waveform visualizer
   const drawWaveform = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
@@ -105,10 +123,9 @@ export default function Recorder({ onStop }) {
 
       for (let i = 0; i < bufferLength; i++) {
         const v = (dataArray[i] - 128) / 128;
-        const amplified = v * 5.5; // Sensitivity multiplier (was 4)
+        const amplified = v * 6.5;
         const y = canvas.height / 2 + amplified * (canvas.height / 2);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         x += sliceWidth;
       }
 
@@ -119,13 +136,19 @@ export default function Recorder({ onStop }) {
     draw();
   };
 
-  // ▶️ Safe playback on iOS (user gesture required)
+  // ▶️ Manual playback (mobile safe)
   const playRecording = () => {
     if (!audioUrl) return;
     const audio = new Audio(audioUrl);
-    audio.play().catch(() => {
-      alert("🔊 Tap again to allow playback (iOS requires interaction).");
-    });
+    audio.playsInline = true;
+
+    if (device === "desktop") {
+      audio.play().catch((err) => console.warn("Playback error:", err));
+    } else {
+      audio.play().catch(() => {
+        alert("🔊 Tap again to allow playback (iOS requires interaction).");
+      });
+    }
   };
 
   return (
@@ -163,6 +186,10 @@ export default function Recorder({ onStop }) {
           ▶️ Play Recording
         </button>
       )}
+
+      <p className="text-xs text-gray-400 mt-2">
+        Device detected: <span className="font-mono">{device}</span>
+      </p>
     </div>
   );
 }
