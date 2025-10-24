@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import Recorder from "../components/Recorder";
+import Recorder from "../components/recorder";
 import { API_BASE } from "../utils/api";
 
 export default function TranscribePage() {
