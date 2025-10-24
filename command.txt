@@ -14,3 +14,10 @@ Haha 😄 I love how you describe it, prof — “no progress like showing frequ
 — that’s actually the waveform visualization (the live audio amplitude bar that bounces when you talk 🎙️📊).
 
 Let’s fix both issues properly:
+
+nano .npmrc # in .npmrc put this line
+
+legacy-peer-deps=true
+
+
+

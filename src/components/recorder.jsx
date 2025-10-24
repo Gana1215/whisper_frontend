@@ -4,6 +4,7 @@ export default function Recorder({ onStop }) {
   const [recording, setRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
   const [device, setDevice] = useState("unknown");
+
   const canvasRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -11,15 +12,15 @@ export default function Recorder({ onStop }) {
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
 
-  // 🧭 Detect browser / device type
+  // 🧭 Detect device type
   useEffect(() => {
     const isMobile = /Mobi|Android/i.test(navigator.userAgent);
     setDevice(isMobile ? "mobile" : "desktop");
   }, []);
 
-  // 🔓 Unlock AudioContext on iOS
+  // 🔓 iOS audio unlock on touch
   useEffect(() => {
-    const unlockAudio = () => {
+    const unlock = () => {
       if (!audioCtxRef.current) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         audioCtxRef.current = new AudioCtx({ latencyHint: "interactive" });
@@ -28,19 +29,31 @@ export default function Recorder({ onStop }) {
         audioCtxRef.current.resume();
       }
     };
-    document.addEventListener("touchstart", unlockAudio, { once: true });
-    document.addEventListener("touchend", unlockAudio, { once: true });
+    document.addEventListener("touchstart", unlock, { once: true });
+    document.addEventListener("touchend", unlock, { once: true });
     return () => {
-      document.removeEventListener("touchstart", unlockAudio);
-      document.removeEventListener("touchend", unlockAudio);
+      document.removeEventListener("touchstart", unlock);
+      document.removeEventListener("touchend", unlock);
+    };
+  }, []);
+
+  // 🧹 Cleanup when component unmounts
+  useEffect(() => {
+    return () => {
+      cancelAnimationFrame(animationRef.current);
+      if (audioCtxRef.current) audioCtxRef.current.close().catch(() => {});
     };
   }, []);
 
   // 🎙️ Start recording
   const startRecording = async () => {
+    if (recording) return;
     try {
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm"
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      const mimeType = isSafari
+        ? "audio/mp4"
+        : MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
         : "audio/mp4";
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -66,43 +79,51 @@ export default function Recorder({ onStop }) {
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mimeType });
+        let blob = new Blob(chunksRef.current, { type: mimeType });
+        // Safari fallback if blob type empty
+        if (!blob.type || blob.size === 0) {
+          blob = new Blob(chunksRef.current, { type: "audio/mp4" });
+        }
+
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
 
-        if (onStop) onStop({ blob, url, device });
+        console.log("🎧 Blob size:", blob.size, "type:", blob.type);
+        onStop?.({ blob, device });
 
-        // 💻 Desktop: auto playback for instant feedback
+        // Auto-play on desktop
         if (device === "desktop") {
-          const autoAudio = new Audio(url);
-          autoAudio.playsInline = true;
-          autoAudio.play().catch((err) =>
-            console.warn("Auto-play blocked:", err)
-          );
+          const auto = new Audio(url);
+          auto.playsInline = true;
+          auto.play().catch((err) => console.warn("Auto-play blocked:", err));
         }
 
-        // 🧹 Cleanup
         stream.getTracks().forEach((t) => t.stop());
         cancelAnimationFrame(animationRef.current);
       };
 
-      recorder.start(100);
-      drawWaveform();
+      // Safari-friendly delayed start
+      setTimeout(() => {
+        recorder.start(100);
+        drawWaveform();
+      }, 200);
     } catch (err) {
-      console.error("Recording error:", err);
-      alert("🎤 Microphone permission or browser not supported.");
+      console.error("🎤 Recording error:", err);
+      alert("Microphone permission denied or browser not supported.");
     }
   };
 
-  // ⏹️ Stop recording
+  // ⏹ Stop recording
   const stopRecording = () => {
-    setRecording(false);
-    if (mediaRecorderRef.current?.state !== "inactive") {
-      mediaRecorderRef.current.stop();
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      setRecording(false);
+      rec.requestData?.();
+      rec.stop();
     }
   };
 
-  // 🎨 Waveform visualizer
+  // 🎨 Waveform drawing
   const drawWaveform = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
@@ -118,9 +139,8 @@ export default function Recorder({ onStop }) {
       ctx.strokeStyle = "#4f46e5";
       ctx.beginPath();
 
-      const sliceWidth = (canvas.width * 1.0) / bufferLength;
+      const sliceWidth = canvas.width / bufferLength;
       let x = 0;
-
       for (let i = 0; i < bufferLength; i++) {
         const v = (dataArray[i] - 128) / 128;
         const amplified = v * 6.5;
@@ -128,7 +148,6 @@ export default function Recorder({ onStop }) {
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         x += sliceWidth;
       }
-
       ctx.lineTo(canvas.width, canvas.height / 2);
       ctx.stroke();
       animationRef.current = requestAnimationFrame(draw);
@@ -136,19 +155,14 @@ export default function Recorder({ onStop }) {
     draw();
   };
 
-  // ▶️ Manual playback (mobile safe)
+  // ▶️ Play last recorded clip
   const playRecording = () => {
     if (!audioUrl) return;
     const audio = new Audio(audioUrl);
     audio.playsInline = true;
-
-    if (device === "desktop") {
-      audio.play().catch((err) => console.warn("Playback error:", err));
-    } else {
-      audio.play().catch(() => {
-        alert("🔊 Tap again to allow playback (iOS requires interaction).");
-      });
-    }
+    audio.play().catch(() => {
+      alert("🔊 Tap again to allow playback (iOS requires interaction).");
+    });
   };
 
   return (
@@ -158,20 +172,20 @@ export default function Recorder({ onStop }) {
         width="500"
         height="100"
         className="rounded-lg shadow-md bg-gray-50"
-      ></canvas>
+      />
 
       <div className="flex space-x-4 mt-2">
         {!recording ? (
           <button
             onClick={startRecording}
-            className="px-6 py-3 bg-indigo-600 text-white rounded-full shadow hover:bg-indigo-700 transition"
+            className="px-6 py-3 bg-indigo-600 text-white rounded-full shadow hover:bg-indigo-700 active:scale-95 transition"
           >
             🎙️ Start Recording
           </button>
         ) : (
           <button
             onClick={stopRecording}
-            className="px-6 py-3 bg-red-500 text-white rounded-full shadow hover:bg-red-600 transition"
+            className="px-6 py-3 bg-red-500 text-white rounded-full shadow hover:bg-red-600 active:scale-95 transition"
           >
             ⏹️ Stop Recording
           </button>
@@ -181,14 +195,14 @@ export default function Recorder({ onStop }) {
       {audioUrl && (
         <button
           onClick={playRecording}
-          className="px-6 py-3 bg-green-500 text-white rounded-full shadow hover:bg-green-600 transition"
+          className="px-6 py-3 bg-green-500 text-white rounded-full shadow hover:bg-green-600 active:scale-95 transition"
         >
           ▶️ Play Recording
         </button>
       )}
 
       <p className="text-xs text-gray-400 mt-2">
-        Device detected: <span className="font-mono">{device}</span>
+        Device: <span className="font-mono">{device}</span>
       </p>
     </div>
   );

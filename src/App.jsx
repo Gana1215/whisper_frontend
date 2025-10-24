@@ -1,115 +1,87 @@
-import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { ReactMic } from "react-mic";
+// ===============================================
+// 🎙️ Mongolian Whisper Frontend (v2.1)
+// Elegant tabbed UI for Transcription & Dataset
+// ===============================================
 
-const API_URL = "https://wstt-demo.onrender.com/transcribe";
+import React, { useState } from "react";
+import TranscribePage from "./pages/TranscribePage";
+import DatasetManager from "./pages/DatasetManager";
 
 export default function App() {
-  const [recording, setRecording] = useState(false);
-  const [transcript, setTranscript] = useState("");
-  const [audioSrc, setAudioSrc] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [device, setDevice] = useState("unknown");
+  const [activeTab, setActiveTab] = useState("transcribe");
 
-  // Detect device type
-  useEffect(() => {
-    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
-    setDevice(isMobile ? "mobile" : "desktop");
-  }, []);
-
-  const startRecording = () => setRecording(true);
-  const stopRecording = () => setRecording(false);
-
-  const onStop = async (recordedBlob) => {
-    console.log("🎤 Recorded:", recordedBlob);
-    await sendAudio(recordedBlob.blob, recordedBlob.device);
-  };
-
-  const sendAudio = async (blob, deviceType = device) => {
-    setLoading(true);
-    const formData = new FormData();
-    formData.append("file", blob, "recording.wav");
-    formData.append("device", deviceType);
-
-    try {
-      const res = await axios.post(API_URL, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      console.log("✅ Backend response:", res.data);
-
-      // Simplified handling
-      const { user_text, playback_path } = res.data;
-      setTranscript(user_text || "No text recognized.");
-
-      if (playback_path) {
-        const fullURL = `${API_URL.replace("/transcribe", "")}${playback_path}`;
-        setAudioSrc(fullURL);
-      } else {
-        setAudioSrc(URL.createObjectURL(blob));
-      }
-    } catch (err) {
-      console.error("❌ Transcription error:", err);
-      setTranscript("Transcription failed.");
-      setAudioSrc(null);
-    } finally {
-      setLoading(false);
+  const renderPage = () => {
+    switch (activeTab) {
+      case "dataset":
+        return <DatasetManager />;
+      default:
+        return <TranscribePage />;
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center text-center p-6 bg-gradient-to-b from-blue-50 to-blue-200">
-      <h1 className="text-3xl font-bold mb-6 text-blue-700">
-        🎙️ Mongolian Whisper Frontend
-      </h1>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center text-center">
+      {/* Header */}
+      <header className="mt-6">
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-indigo-700 drop-shadow-sm">
+          🎙️ Mongolian Whisper Frontend
+        </h1>
+        <p className="text-sm text-indigo-600/70 mt-1">
+          Fast Speech-to-Text + Dataset Curation
+        </p>
+      </header>
 
-      <ReactMic
-        record={recording}
-        className="w-80"
-        strokeColor="#0ea5e9"
-        backgroundColor="#e0f2fe"
-        onStop={onStop}
-      />
-
-      <div className="mt-5">
-        {!recording ? (
-          <button
-            onClick={startRecording}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-          >
-            🎧 Start Recording
-          </button>
-        ) : (
-          <button
-            onClick={stopRecording}
-            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
-          >
-            ⏹️ Stop Recording
-          </button>
-        )}
-      </div>
-
-      {/* 🎵 Single player — only backend playback */}
-      {audioSrc && (
-        <audio
-          src={audioSrc}
-          controls
-          playsInline
-          autoPlay={device === "desktop"}
-          className="mt-6 border-2 border-blue-300 rounded-xl shadow-md w-72 sm:w-96"
+      {/* Tabs */}
+      <nav
+        className="flex space-x-4 sm:space-x-6 mt-6"
+        role="tablist"
+        aria-label="Main navigation"
+      >
+        <TabButton
+          label="🎧 Transcribe"
+          active={activeTab === "transcribe"}
+          onClick={() => setActiveTab("transcribe")}
         />
-      )}
+        <TabButton
+          label="🗂️ Dataset Manager"
+          active={activeTab === "dataset"}
+          onClick={() => setActiveTab("dataset")}
+        />
+      </nav>
 
-      <div className="mt-6 w-full max-w-md">
-        {loading ? (
-          <p className="text-blue-700 animate-pulse">⏳ Transcribing...</p>
-        ) : (
-          transcript && (
-            <p className="bg-white p-4 rounded-xl shadow text-gray-700 whitespace-pre-wrap">
-              {transcript}
-            </p>
-          )
-        )}
-      </div>
+      {/* Page container */}
+      <main className="w-full max-w-2xl mt-6 px-4 pb-16 transition-opacity duration-500 ease-in-out">
+        {renderPage()}
+      </main>
+
+      {/* Footer */}
+      <footer className="mt-auto mb-4 text-xs text-indigo-600/70">
+        Built with ❤️ by <b>Ganaacts</b> — Mongolian Whisper STT
+        <br />
+        <span className="text-[10px] opacity-70">
+          (React + FastAPI • Mobile ready)
+        </span>
+      </footer>
     </div>
+  );
+}
+
+// 🎛️ Reusable tab button component
+function TabButton({ label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      onKeyDown={(e) => e.key === "Enter" && onClick()}
+      role="tab"
+      aria-selected={active}
+      tabIndex={active ? 0 : -1}
+      className={`px-4 py-2 rounded-lg font-medium transition shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
+        active
+          ? "bg-indigo-600 text-white shadow-md scale-105"
+          : "bg-white text-indigo-700 border border-indigo-300 hover:bg-indigo-50"
+      }`}
+    >
+      {label}
+    </button>
   );
 }

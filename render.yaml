@@ -1,10 +1,9 @@
 services:
-  - type: web
+  - type: static
     name: mongolian-whisper-frontend
-    env: node
-    plan: starter
-    region: oregon
-    buildCommand: |
-      npm install
-      npm run build
-    startCommand: npx serve -s dist -l 10001
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE
+        value: https://mongolian-whisper-api.onrender.com
