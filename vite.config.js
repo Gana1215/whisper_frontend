@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// 🌐 Allowed hosts for local + Render backend
+// 🌐 Allowed hosts for local + Render backend/frontend
 const allowedHosts = [
   "localhost",
   "127.0.0.1",
-  "wstt-demo.onrender.com", // ✅ your Render backend
+  "wstt-demo.onrender.com",          // ✅ your Render backend
+  "whisper-frontend-dhx3.onrender.com", // ✅ your Render frontend (added)
 ];
 
 // Dynamically add ngrok or LAN IP if testing on mobile
