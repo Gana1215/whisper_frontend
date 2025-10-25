@@ -9,9 +9,10 @@ export default function TranscribePage() {
   const [manualText, setManualText] = useState("");
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false); // ⏳ prevents double click
   const [device, setDevice] = useState("desktop");
 
-  // 🔍 Detect device for backend tagging
+  // 🔍 Detect device
   useEffect(() => {
     const isMobile = /Mobi|Android/i.test(navigator.userAgent);
     setDevice(isMobile ? "mobile" : "desktop");
@@ -21,10 +22,11 @@ export default function TranscribePage() {
   const handleStop = async ({ blob }) => {
     if (!blob) return;
     setAudioBlob(blob);
+    setSaved(false); // re-enable Save after new recording
     setTimeout(() => sendAudio(blob), 300);
   };
 
-  // 🧠 Send blob to backend
+  // 🧠 Send blob to backend (inference only)
   const sendAudio = async (blob) => {
     setLoading(true);
     setText("🎧 Uploading audio… please wait");
@@ -59,10 +61,12 @@ export default function TranscribePage() {
   const saveToCSV = async () => {
     if (!audioBlob) return alert("Record first!");
     if (!manualText.trim()) return alert("Enter the corresponding text!");
+    if (saving || saved) return; // 🔒 block multiple clicks
+
+    setSaving(true);
 
     const now = new Date();
     const pad = (n) => n.toString().padStart(2, "0");
-    // ✅ Fixed to usr001_ naming convention
     const fileName = `usr001_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(
       now.getDate()
     )}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.wav`;
@@ -79,7 +83,6 @@ export default function TranscribePage() {
       if (res.data?.status === "ok") {
         setSaved(true);
         setManualText("");
-        setTimeout(() => setSaved(false), 1500);
         window.dispatchEvent(new Event("dataset-updated"));
       } else {
         alert("⚠️ Save may not have succeeded.");
@@ -87,6 +90,8 @@ export default function TranscribePage() {
     } catch (e) {
       console.error("❌ /dataset/add failed:", e);
       alert("Failed to save to dataset.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -111,16 +116,22 @@ export default function TranscribePage() {
           value={manualText}
           onChange={(e) => setManualText(e.target.value)}
           className="w-full p-2 rounded-lg border border-blue-300 focus:ring focus:ring-blue-200"
+          disabled={saving || saved}
         />
 
         <button
           onClick={saveToCSV}
-          className="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 active:scale-95 transition"
+          disabled={saving || saved} // 🔒 disable after one click
+          className={`mt-2 px-4 py-2 rounded-lg text-white transition ${
+            saving || saved
+              ? "bg-gray-400 cursor-not-allowed"
+              : "bg-green-600 hover:bg-green-700 active:scale-95"
+          }`}
         >
-          💾 Save to CSV DB
+          {saving ? "💾 Saving..." : saved ? "✔ Saved!" : "💾 Save to CSV DB"}
         </button>
 
-        {saved && <p className="text-green-700 mt-2">✔️ Saved</p>}
+        {saved && <p className="text-green-700 mt-2">✅ Saved successfully!</p>}
       </div>
 
       <p className="text-xs text-gray-400 mt-2">
