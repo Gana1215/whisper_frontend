@@ -123,7 +123,7 @@ export default function Recorder({ onStop }) {
     }
   };
 
-  // 🎨 Waveform drawing
+  // 🎨 Waveform drawing — tuned amplitude
   const drawWaveform = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
@@ -141,13 +141,16 @@ export default function Recorder({ onStop }) {
 
       const sliceWidth = canvas.width / bufferLength;
       let x = 0;
+
       for (let i = 0; i < bufferLength; i++) {
         const v = (dataArray[i] - 128) / 128;
-        const amplified = v * 6.5;
+        // ⚙️ Adjusted amplitude: was 6.5 → now 4.0 for smooth visual balance
+        const amplified = v * 4.0;
         const y = canvas.height / 2 + amplified * (canvas.height / 2);
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         x += sliceWidth;
       }
+
       ctx.lineTo(canvas.width, canvas.height / 2);
       ctx.stroke();
       animationRef.current = requestAnimationFrame(draw);

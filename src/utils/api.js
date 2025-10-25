@@ -1,6 +1,9 @@
 // ==========================================
 // 🌐 API Utility for Mongolian Whisper Frontend
-// Supports /transcribe and /dataset/* routes
+// Version: 2.0 — Unified Storage Edition
+// ✅ Works with /record_archive/wavs/* (no /uploads)
+// ✅ Supports /transcribe and /dataset/* routes
+// ✅ Mobile-safe + timestamped filenames
 // ==========================================
 
 // 🧭 Dynamic backend endpoint (local or Render)
@@ -10,6 +13,9 @@ export const API_BASE =
     ? "http://127.0.0.1:10000"
     : "https://wstt-demo.onrender.com");
 
+// 🪄 Startup log (for sanity check)
+console.log(`🛰️ API_BASE in use → ${API_BASE}`);
+
 // 🧩 Simple timestamp-based filename (usr_YYYYMMDD_HHMMSS.wav)
 export function generateFileName(prefix = "usr") {
   const now = new Date();
@@ -18,9 +24,6 @@ export function generateFileName(prefix = "usr") {
     now.getDate()
   )}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.wav`;
 }
-
-// 🪄 Startup log (for sanity check)
-console.log(`🛰️ API_BASE in use → ${API_BASE}`);
 
 // 🔹 Generic response handler
 async function handleResponse(res) {
@@ -32,7 +35,7 @@ async function handleResponse(res) {
   return res.json();
 }
 
-// 🎙️ Transcribe audio file
+// 🎙️ Transcribe audio file (handles iOS/Android blobs too)
 export async function transcribeAudio(blob, device = "desktop") {
   const ext =
     blob?.type?.includes("mp4")
@@ -128,5 +131,36 @@ export async function deleteSample(fileName) {
   } catch (err) {
     console.error("🚨 deleteSample failed:", err.message);
     throw err;
+  }
+}
+
+// 🔊 Build playback URL for any file (desktop + mobile)
+export function getAudioUrl(fileName) {
+  if (fileName.startsWith("/record_archive"))
+    return `${API_BASE}${fileName}`;
+  if (fileName.startsWith("wavs/"))
+    return `${API_BASE}/record_archive/${fileName}`;
+  return `${API_BASE}/record_archive/wavs/${fileName}`;
+}
+
+// 🧹 Cleanup orphan files (usr_*, wv_*, temp_*)
+export async function cleanupOrphans() {
+  try {
+    const res = await fetch(`${API_BASE}/dataset/cleanup`, { method: "POST" });
+    return await handleResponse(res);
+  } catch (err) {
+    console.error("🚨 cleanupOrphans failed:", err.message);
+    throw err;
+  }
+}
+
+// 🧠 Optional — backend health check
+export async function checkHealth() {
+  try {
+    const res = await fetch(`${API_BASE}/`);
+    return await handleResponse(res);
+  } catch (err) {
+    console.error("🚨 Backend unreachable:", err.message);
+    return null;
   }
 }

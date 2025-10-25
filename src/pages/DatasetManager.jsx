@@ -6,11 +6,10 @@ export default function DatasetManager() {
   const [samples, setSamples] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // ✅ Fetch dataset from backend
+  // ✅ Fetch dataset list
   const fetchSamples = async () => {
     setLoading(true);
     try {
-      // Add timestamp to avoid caching
       const res = await axios.get(`${API_BASE}/dataset/list?_=${Date.now()}`, {
         headers: { "Cache-Control": "no-cache" },
       });
@@ -42,43 +41,38 @@ export default function DatasetManager() {
     }
   };
 
-  // ✅ Delete sample with confirmation and auto-refresh
+  // ✅ Delete sample and refresh
   const deleteSample = async (file_name) => {
-    const confirmed = window.confirm(`🗑️ Are you sure you want to delete "${file_name}"?`);
-    if (!confirmed) return;
-
+    if (!window.confirm(`🗑️ Delete "${file_name}"?`)) return;
     const fd = new FormData();
     fd.append("file_name", file_name);
 
     try {
       const res = await axios.post(`${API_BASE}/dataset/delete`, fd);
       if (res.data?.status === "ok") {
-        // Immediately remove locally
         setSamples((prev) => prev.filter((s) => s.file_name !== file_name));
-        // Then re-fetch to confirm backend sync
         await fetchSamples();
       } else {
-        console.warn("⚠️ Delete returned unexpected:", res.data);
-        alert("Delete may not have succeeded. Please refresh.");
+        alert("⚠️ Delete may not have succeeded.");
       }
     } catch (err) {
       console.error("❌ /dataset/delete failed:", err);
-      alert("Delete failed. Please check backend log or refresh the page.");
+      alert("Delete failed — check backend logs.");
     }
   };
 
-  // 🚀 Fetch samples on load + listen for "dataset-updated"
+  // 🚀 Fetch on load
   useEffect(() => {
     fetchSamples();
     window.addEventListener("dataset-updated", fetchSamples);
     return () => window.removeEventListener("dataset-updated", fetchSamples);
   }, []);
 
-  // 🧹 NEW: Cleanup + Refresh combo
+  // 🧹 Cleanup orphan files + refresh
   const cleanupAndRefresh = async () => {
     try {
       const res = await axios.post(`${API_BASE}/dataset/cleanup`);
-      console.log(`🧹 Cleaned ${res.data?.count || 0} orphan files`);
+      console.log(`🧹 Cleaned ${res.data?.removed || 0} orphan files`);
     } catch (e) {
       console.warn("⚠️ Cleanup failed:", e);
     }
@@ -89,7 +83,8 @@ export default function DatasetManager() {
     <div className="w-full flex flex-col items-center">
       <h2 className="text-2xl font-bold text-blue-700 mb-4">🗂️ Dataset Manager</h2>
 
-      <div className="w-full max-w-2xl bg-white rounded-lg shadow p-4 space-y-2">
+      {/* 🧾 Scrollable list container */}
+      <div className="w-full max-w-2xl bg-white rounded-lg shadow p-4 space-y-2 max-h-[480px] overflow-y-auto">
         {loading && <p className="text-gray-600 animate-pulse">Loading samples...</p>}
         {!loading && samples.length === 0 && (
           <p className="text-gray-600">No samples yet. Add from the Transcribe tab.</p>
@@ -99,7 +94,6 @@ export default function DatasetManager() {
           <Row
             key={s.file_name}
             fileName={s.file_name}
-            // ✅ Handle both "text" and " text" headers
             initialText={s.text || s[" text"] || ""}
             onSave={(text) => updateText(s.file_name, text)}
             onDelete={() => deleteSample(s.file_name)}
@@ -107,7 +101,6 @@ export default function DatasetManager() {
         ))}
       </div>
 
-      {/* 🔄 Changed button */}
       <button
         onClick={cleanupAndRefresh}
         className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition active:scale-95"
@@ -118,16 +111,19 @@ export default function DatasetManager() {
   );
 }
 
-// 🎵 Row component
+// 🎵 Row Component
 function Row({ fileName, initialText, onSave, onDelete }) {
   const [val, setVal] = useState(initialText || "");
 
   const handlePlay = async () => {
     try {
-      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(fileName)}`;
+      // 🧩 file_name may include 'wavs/', clean before using
+      const cleanName = fileName.replace(/^wavs\//, "");
+      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(cleanName)}`;
       const audio = new Audio(audioUrl);
+      audio.playsInline = true;
       await audio.play();
-      console.log(`▶️ Playing: ${fileName}`);
+      console.log(`▶️ Playing: ${audioUrl}`);
     } catch (err) {
       console.error("Play error:", err);
       alert("⚠️ Failed to play this recording. File may not exist.");

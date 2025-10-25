@@ -17,25 +17,24 @@ export default function TranscribePage() {
     setDevice(isMobile ? "mobile" : "desktop");
   }, []);
 
-  // 🎙️ Handle recording stop event
+  // 🎙️ Handle recording stop
   const handleStop = async ({ blob }) => {
     if (!blob) return;
     setAudioBlob(blob);
-
-    // ✅ Small delay ensures Safari/Chrome finishes writing audio
     setTimeout(() => sendAudio(blob), 300);
   };
 
-  // 🧠 Send blob for transcription
+  // 🧠 Send blob to backend
   const sendAudio = async (blob) => {
     setLoading(true);
-    setText("");
+    setText("🎧 Uploading audio… please wait");
 
-    const ext = blob?.type?.includes("mp4")
-      ? "mp4"
-      : blob?.type?.includes("webm")
-      ? "webm"
-      : "wav";
+    const ext =
+      blob?.type?.includes("mp4")
+        ? "mp4"
+        : blob?.type?.includes("webm")
+        ? "webm"
+        : "wav";
 
     const fd = new FormData();
     fd.append("file", blob, `recording.${ext}`);
@@ -45,32 +44,28 @@ export default function TranscribePage() {
       const res = await axios.post(`${API_BASE}/transcribe`, fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-
       const t = res.data?.user_text || "";
       setText(t.length > 0 ? t : "No text recognized.");
     } catch (err) {
       console.error("❌ /transcribe failed:", err);
-      const msg =
-        err.response?.data?.detail || err.message || "Transcription failed.";
+      const msg = err.response?.data?.detail || err.message || "Transcription failed.";
       setText(`⚠️ ${msg}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // 💾 Save to dataset (with proper filename)
+  // 💾 Save audio + text to dataset
   const saveToCSV = async () => {
     if (!audioBlob) return alert("Record first!");
     if (!manualText.trim()) return alert("Enter the corresponding text!");
 
-    // 🕒 Generate unique timestamp name (usr_YYYYMMDD_HHMMSS.wav)
     const now = new Date();
     const pad = (n) => n.toString().padStart(2, "0");
-    const fileName = `usr_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(
+    // ✅ Fixed to usr001_ naming convention
+    const fileName = `usr001_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(
       now.getDate()
-    )}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(
-      now.getSeconds()
-    )}.wav`;
+    )}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.wav`;
 
     const fd = new FormData();
     fd.append("file", audioBlob, fileName);
@@ -85,11 +80,9 @@ export default function TranscribePage() {
         setSaved(true);
         setManualText("");
         setTimeout(() => setSaved(false), 1500);
-
-        // ✅ 🔔 Notify DatasetManager to refresh automatically
         window.dispatchEvent(new Event("dataset-updated"));
       } else {
-        alert("⚠️ Save may not have succeeded. Check logs.");
+        alert("⚠️ Save may not have succeeded.");
       }
     } catch (e) {
       console.error("❌ /dataset/add failed:", e);
@@ -97,7 +90,6 @@ export default function TranscribePage() {
     }
   };
 
-  // 🖼️ UI
   return (
     <div className="flex flex-col items-center space-y-4">
       <Recorder onStop={handleStop} />
