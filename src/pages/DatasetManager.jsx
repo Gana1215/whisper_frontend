@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { API_BASE } from "../utils/api";
 
 export default function DatasetManager() {
   const [samples, setSamples] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
 
   // ✅ Fetch dataset list
   const fetchSamples = async () => {
@@ -30,11 +33,8 @@ export default function DatasetManager() {
     fd.append("new_text", new_text);
     try {
       const res = await axios.post(`${API_BASE}/dataset/update`, fd);
-      if (res.data?.status === "ok") {
-        console.log("✅ Updated:", file_name);
-      } else {
-        alert("⚠️ Update may not have succeeded.");
-      }
+      if (res.data?.status === "ok") console.log("✅ Updated:", file_name);
+      else alert("⚠️ Update may not have succeeded.");
     } catch (err) {
       console.error("❌ /dataset/update failed:", err);
       alert("⚠️ Update failed.");
@@ -46,15 +46,12 @@ export default function DatasetManager() {
     if (!window.confirm(`🗑️ Delete "${file_name}"?`)) return;
     const fd = new FormData();
     fd.append("file_name", file_name);
-
     try {
       const res = await axios.post(`${API_BASE}/dataset/delete`, fd);
       if (res.data?.status === "ok") {
         setSamples((prev) => prev.filter((s) => s.file_name !== file_name));
         await fetchSamples();
-      } else {
-        alert("⚠️ Delete may not have succeeded.");
-      }
+      } else alert("⚠️ Delete may not have succeeded.");
     } catch (err) {
       console.error("❌ /dataset/delete failed:", err);
       alert("Delete failed — check backend logs.");
@@ -79,15 +76,42 @@ export default function DatasetManager() {
     await fetchSamples();
   };
 
+  // ⬇️ Download dataset ZIP
+  const downloadDataset = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/dataset/export`, {
+        responseType: "blob",
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "MongolianWhisper_Dataset.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      console.log("✅ Dataset downloaded");
+    } catch (err) {
+      console.error("❌ /dataset/export failed:", err);
+      alert("⚠️ Failed to download dataset ZIP.");
+    }
+  };
+
   return (
     <div className="w-full flex flex-col items-center">
-      <h2 className="text-2xl font-bold text-blue-700 mb-4">🗂️ Dataset Manager</h2>
+      <h2 className="text-2xl font-bold text-blue-700 mb-4">
+        🗂️ Dataset Manager
+      </h2>
 
       {/* 🧾 Scrollable list container */}
       <div className="w-full max-w-2xl bg-white rounded-lg shadow p-4 space-y-2 max-h-[480px] overflow-y-auto">
-        {loading && <p className="text-gray-600 animate-pulse">Loading samples...</p>}
+        {loading && (
+          <p className="text-gray-600 animate-pulse">Loading samples...</p>
+        )}
         {!loading && samples.length === 0 && (
-          <p className="text-gray-600">No samples yet. Add from the Transcribe tab.</p>
+          <p className="text-gray-600">
+            No samples yet. Add from the Transcribe tab.
+          </p>
         )}
 
         {samples.map((s) => (
@@ -101,12 +125,21 @@ export default function DatasetManager() {
         ))}
       </div>
 
-      <button
-        onClick={cleanupAndRefresh}
-        className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition active:scale-95"
-      >
-        🔄 Refresh & Clean Orphans
-      </button>
+      <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-4">
+        <button
+          onClick={cleanupAndRefresh}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:scale-95"
+        >
+          🔄 Refresh & Clean Orphans
+        </button>
+
+        <button
+          onClick={downloadDataset}
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:scale-95"
+        >
+          ⬇️ Download Dataset
+        </button>
+      </div>
     </div>
   );
 }
@@ -114,12 +147,16 @@ export default function DatasetManager() {
 // 🎵 Row Component
 function Row({ fileName, initialText, onSave, onDelete }) {
   const [val, setVal] = useState(initialText || "");
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
 
   const handlePlay = async () => {
     try {
-      // 🧩 file_name may include 'wavs/', clean before using
       const cleanName = fileName.replace(/^wavs\//, "");
-      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(cleanName)}`;
+      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(
+        cleanName
+      )}`;
       const audio = new Audio(audioUrl);
       audio.playsInline = true;
       await audio.play();
@@ -130,15 +167,71 @@ function Row({ fileName, initialText, onSave, onDelete }) {
     }
   };
 
+  // 🔁 Re-record logic
+  const handleRecord = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => chunksRef.current.push(e.data);
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const fd = new FormData();
+        fd.append("file", blob, "re_record.webm");
+        fd.append("file_name", fileName);
+        try {
+          const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          if (res.data?.status === "ok") {
+            alert("✅ Re-recorded successfully!");
+          } else {
+            alert("⚠️ Re-record may not have succeeded.");
+          }
+        } catch (err) {
+          console.error("❌ /dataset/update_audio failed:", err);
+          alert("⚠️ Failed to re-record audio.");
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      console.log(`🎙️ Started re-recording for ${fileName}`);
+    } catch (err) {
+      console.error("Mic access error:", err);
+      alert("⚠️ Microphone access denied or unavailable.");
+    }
+  };
+
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-200 pb-2">
       <div className="flex items-center space-x-2 w-full">
+        {/* ▶️ Play */}
         <button
           onClick={handlePlay}
           className="bg-green-500 text-white rounded-full px-3 py-1 hover:bg-green-600 active:scale-95"
           title="Play this recording"
         >
           ▶️
+        </button>
+
+        {/* 🎙️ Re-record */}
+        <button
+          onClick={handleRecord}
+          className={`${
+            isRecording ? "bg-red-600" : "bg-orange-500"
+          } text-white rounded-full px-3 py-1 hover:opacity-90 active:scale-95`}
+          title="Re-record this voice"
+        >
+          {isRecording ? "⏹️ Stop" : "🎙️ Re-record"}
         </button>
 
         <div className="flex flex-col w-full">
