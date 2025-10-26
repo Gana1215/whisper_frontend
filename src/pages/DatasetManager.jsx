@@ -1,3 +1,11 @@
+// ===============================================
+// 🎙️ DatasetManager.jsx (v4.0 — Enhanced Edition)
+// ✅ Fix: text updates correctly (no "EMPTY_AUDIO")
+// ✅ Add: ✏️ edit mode with lock/unlock
+// ✅ Add: ➕ new record (placeholder beep)
+// ✅ Fully mobile-safe
+// ===============================================
+
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { API_BASE } from "../utils/api";
@@ -29,19 +37,18 @@ export default function DatasetManager() {
     }
   };
 
-  // ✅ Update text in CSV (fixed NoneType issue)
+  // ✅ Update text in CSV (fixed key)
   const updateText = async (file_name, new_text) => {
     const cleanName = (file_name || "").trim();
     const cleanText = (new_text || "").trim();
     if (!cleanName || !cleanText) {
-      console.warn("⚠️ Missing file_name or new_text");
       showToast("⚠️ Empty text ignored");
       return;
     }
 
     const fd = new FormData();
     fd.append("file_name", cleanName);
-    fd.append("new_text", cleanText);
+    fd.append("text", cleanText); // ✅ FIXED key
 
     try {
       const res = await axios.post(`${API_BASE}/dataset/update`, fd, {
@@ -50,19 +57,31 @@ export default function DatasetManager() {
 
       if (res.data?.status === "ok") {
         showToast("💾 Updated");
-        // Update immediately without waiting for refresh
         setSamples((prev) =>
           prev.map((s) =>
             s.file_name === cleanName ? { ...s, text: cleanText } : s
           )
         );
       } else {
-        console.warn("⚠️ Unexpected response:", res.data);
         showToast("⚠️ Update failed.");
       }
     } catch (err) {
       console.error("❌ /dataset/update failed:", err);
       showToast("⚠️ Update failed.");
+    }
+  };
+
+  // ✅ Add new placeholder record
+  const addNewRecord = async () => {
+    try {
+      const res = await axios.post(`${API_BASE}/dataset/add_empty`);
+      if (res.data?.status === "ok") {
+        showToast("➕ Added new record");
+        fetchSamples();
+      } else showToast("⚠️ Add failed.");
+    } catch (err) {
+      console.error("❌ /dataset/add_empty failed:", err);
+      showToast("⚠️ Add failed.");
     }
   };
 
@@ -112,7 +131,6 @@ export default function DatasetManager() {
 
   return (
     <div className="relative w-full flex flex-col items-center">
-      {/* ✅ Toast */}
       {toast && (
         <div className="absolute top-2 z-50 bg-gray-900 text-white text-sm px-3 py-1 rounded-md shadow animate-fade">
           {toast}
@@ -120,6 +138,14 @@ export default function DatasetManager() {
       )}
 
       <h2 className="text-2xl font-bold text-blue-700 mb-3">🗂️ Dataset Manager</h2>
+
+      {/* ➕ Add Button */}
+      <button
+        onClick={addNewRecord}
+        className="mb-3 px-4 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 active:scale-95 text-sm"
+      >
+        ➕ Add New Record
+      </button>
 
       {/* 🧾 Scrollable list */}
       <div className="w-full max-w-2xl bg-white rounded-lg shadow p-3 space-y-1 max-h-[460px] overflow-y-auto">
@@ -157,9 +183,10 @@ export default function DatasetManager() {
   );
 }
 
-// 🎵 Row Component (Compact, mobile safe)
+// 🎵 Row Component (Compact, editable, mobile-safe)
 function Row({ fileName, initialText, onSave, onDelete }) {
   const [val, setVal] = useState(initialText || "");
+  const [editing, setEditing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const mediaRecorderRef = useRef(null);
@@ -168,6 +195,7 @@ function Row({ fileName, initialText, onSave, onDelete }) {
 
   // ▶️ Play
   const handlePlay = async () => {
+    if (editing) return; // disable while editing
     try {
       if (isPlaying && audioRef.current) {
         audioRef.current.pause();
@@ -184,12 +212,12 @@ function Row({ fileName, initialText, onSave, onDelete }) {
       setIsPlaying(true);
     } catch (err) {
       console.error("⚠️ Play failed:", err);
-      window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Play failed" }));
     }
   };
 
-  // 🎙️ Re-record (mobile safe)
+  // 🎙️ Re-record
   const handleRecord = async () => {
+    if (editing) return; // disable while editing
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
@@ -208,17 +236,10 @@ function Row({ fileName, initialText, onSave, onDelete }) {
         fd.append("file", blob, "re_record.webm");
         fd.append("file_name", fileName);
         try {
-          const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd, {
-            headers: { "Content-Type": "multipart/form-data" },
-          });
-          if (res.data?.status === "ok") {
-            window.dispatchEvent(new CustomEvent("toast", { detail: "🎙️ Re-recorded" }));
-          } else {
-            window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Record failed" }));
-          }
+          const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd);
+          if (res.data?.status === "ok") window.location.reload();
         } catch (err) {
           console.error("❌ /dataset/update_audio failed:", err);
-          window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Record failed" }));
         }
       };
 
@@ -226,42 +247,66 @@ function Row({ fileName, initialText, onSave, onDelete }) {
       setIsRecording(true);
     } catch (err) {
       console.error("⚠️ Mic access denied:", err);
-      window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Mic access denied" }));
     }
+  };
+
+  // 📝 Toggle edit
+  const toggleEdit = async () => {
+    if (editing) {
+      await onSave(val);
+    }
+    setEditing(!editing);
   };
 
   return (
     <div className="flex items-center justify-between border-b border-gray-200 pb-1">
       <div className="flex items-center space-x-2 w-full">
-        {/* ▶️ / ⏹️ */}
+        {/* ▶️ */}
         <button
           onClick={handlePlay}
+          disabled={editing}
           className={`${
             isPlaying ? "bg-gray-500" : "bg-green-500"
-          } text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
-          title={isPlaying ? "Stop" : "Play"}
+          } text-white rounded-full w-7 h-7 flex items-center justify-center ${
+            editing ? "opacity-50 cursor-not-allowed" : "hover:opacity-90 active:scale-95"
+          }`}
         >
           {isPlaying ? "⏹️" : "▶️"}
         </button>
 
-        {/* 🎙️ / ⏹️ */}
+        {/* 🎙️ */}
         <button
           onClick={handleRecord}
+          disabled={editing}
           className={`${
             isRecording ? "bg-red-600" : "bg-orange-500"
-          } text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
-          title={isRecording ? "Stop" : "Re-record"}
+          } text-white rounded-full w-7 h-7 flex items-center justify-center ${
+            editing ? "opacity-50 cursor-not-allowed" : "hover:opacity-90 active:scale-95"
+          }`}
         >
           {isRecording ? "⏹️" : "🎤"}
         </button>
 
-        {/* 📝 Editable text */}
+        {/* ✏️ / ✔️ */}
+        <button
+          onClick={toggleEdit}
+          className={`${
+            editing ? "bg-blue-600" : "bg-gray-400"
+          } text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
+          title={editing ? "Save" : "Edit text"}
+        >
+          {editing ? "✔️" : "✏️"}
+        </button>
+
+        {/* Text field */}
         <input
           type="text"
           value={val}
+          readOnly={!editing}
           onChange={(e) => setVal(e.target.value)}
-          onBlur={() => onSave(val)}
-          className="border p-1 rounded w-full text-sm truncate focus:ring focus:ring-blue-200"
+          className={`border p-1 rounded w-full text-sm truncate ${
+            editing ? "bg-white" : "bg-gray-100 cursor-default"
+          } focus:ring focus:ring-blue-200`}
         />
       </div>
 
@@ -276,15 +321,3 @@ function Row({ fileName, initialText, onSave, onDelete }) {
     </div>
   );
 }
-
-/* ✨ CSS animation helper (add to tailwind.css or index.css)
-@keyframes fade {
-  0% { opacity: 0; transform: translateY(-5px); }
-  10% { opacity: 1; transform: translateY(0); }
-  90% { opacity: 1; }
-  100% { opacity: 0; transform: translateY(-5px); }
-}
-.animate-fade {
-  animation: fade 2s ease-in-out;
-}
-*/
