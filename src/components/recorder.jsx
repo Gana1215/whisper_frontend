@@ -18,7 +18,7 @@ export default function Recorder({ onStop }) {
     setDevice(isMobile ? "mobile" : "desktop");
   }, []);
 
-  // 🔓 iOS audio unlock on touch
+  // 🔓 iOS audio unlock
   useEffect(() => {
     const unlock = () => {
       if (!audioCtxRef.current) {
@@ -37,7 +37,7 @@ export default function Recorder({ onStop }) {
     };
   }, []);
 
-  // 🧹 Cleanup when component unmounts
+  // 🧹 Cleanup
   useEffect(() => {
     return () => {
       cancelAnimationFrame(animationRef.current);
@@ -45,16 +45,13 @@ export default function Recorder({ onStop }) {
     };
   }, []);
 
-  // 🎙️ Start recording
+  // 🎙️ Start recording — unified WebM across all devices
   const startRecording = async () => {
     if (recording) return;
     try {
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      const mimeType = isSafari
-        ? "audio/mp4"
-        : MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
-        : "audio/mp4";
+        : "audio/webm";
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream, { mimeType });
@@ -79,16 +76,12 @@ export default function Recorder({ onStop }) {
       };
 
       recorder.onstop = () => {
-        let blob = new Blob(chunksRef.current, { type: mimeType });
-        // Safari fallback if blob type empty
-        if (!blob.type || blob.size === 0) {
-          blob = new Blob(chunksRef.current, { type: "audio/mp4" });
-        }
-
+        // ✅ Always produce WebM (no MP4 fallback)
+        const blob = new Blob(chunksRef.current, { type: mimeType });
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
 
-        console.log("🎧 Blob size:", blob.size, "type:", blob.type);
+        console.log("🎧 Recorded:", blob.type, "size:", blob.size);
         onStop?.({ blob, device });
 
         // Auto-play on desktop
@@ -113,7 +106,7 @@ export default function Recorder({ onStop }) {
     }
   };
 
-  // ⏹ Stop recording
+  // ⏹ Stop
   const stopRecording = () => {
     const rec = mediaRecorderRef.current;
     if (rec && rec.state !== "inactive") {
@@ -123,7 +116,7 @@ export default function Recorder({ onStop }) {
     }
   };
 
-  // 🎨 Waveform drawing — tuned amplitude
+  // 🎨 Waveform drawing
   const drawWaveform = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
@@ -144,7 +137,6 @@ export default function Recorder({ onStop }) {
 
       for (let i = 0; i < bufferLength; i++) {
         const v = (dataArray[i] - 128) / 128;
-        // ⚙️ Adjusted amplitude: was 6.5 → now 4.0 for smooth visual balance
         const amplified = v * 4.0;
         const y = canvas.height / 2 + amplified * (canvas.height / 2);
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
@@ -158,7 +150,7 @@ export default function Recorder({ onStop }) {
     draw();
   };
 
-  // ▶️ Play last recorded clip
+  // ▶️ Play
   const playRecording = () => {
     if (!audioUrl) return;
     const audio = new Audio(audioUrl);
