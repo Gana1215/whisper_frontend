@@ -5,6 +5,13 @@ import { API_BASE } from "../utils/api";
 export default function DatasetManager() {
   const [samples, setSamples] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState("");
+
+  // ✅ Toast helper
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 1800);
+  };
 
   // ✅ Fetch dataset list
   const fetchSamples = async () => {
@@ -16,7 +23,7 @@ export default function DatasetManager() {
       setSamples(res.data?.samples || []);
     } catch (err) {
       console.error("❌ /dataset/list failed:", err);
-      alert("⚠️ Failed to load dataset list.");
+      showToast("⚠️ Failed to load dataset list.");
     } finally {
       setLoading(false);
     }
@@ -30,48 +37,40 @@ export default function DatasetManager() {
     fd.append("new_text", new_text);
     try {
       const res = await axios.post(`${API_BASE}/dataset/update`, fd);
-      if (res.data?.status === "ok") console.log("✅ Updated:", file_name);
-      else alert("⚠️ Update may not have succeeded.");
+      if (res.data?.status === "ok") showToast("💾 Updated");
     } catch (err) {
       console.error("❌ /dataset/update failed:", err);
-      alert("⚠️ Update failed.");
+      showToast("⚠️ Update failed.");
     }
   };
 
-  // ✅ Delete sample and refresh
+  // ✅ Delete sample
   const deleteSample = async (file_name) => {
-    if (!window.confirm(`🗑️ Delete "${file_name}"?`)) return;
     const fd = new FormData();
     fd.append("file_name", file_name);
     try {
       const res = await axios.post(`${API_BASE}/dataset/delete`, fd);
       if (res.data?.status === "ok") {
         setSamples((prev) => prev.filter((s) => s.file_name !== file_name));
-        await fetchSamples();
-      } else alert("⚠️ Delete may not have succeeded.");
+        showToast("🗑️ Deleted");
+      }
     } catch (err) {
       console.error("❌ /dataset/delete failed:", err);
-      alert("Delete failed — check backend logs.");
+      showToast("⚠️ Delete failed.");
     }
   };
 
-  // 🚀 Fetch on load
+  // 🚀 On load
   useEffect(() => {
     fetchSamples();
     window.addEventListener("dataset-updated", fetchSamples);
-    return () => window.removeEventListener("dataset-updated", fetchSamples);
+    const handleToast = (e) => showToast(e.detail);
+    window.addEventListener("toast", handleToast);
+    return () => {
+      window.removeEventListener("dataset-updated", fetchSamples);
+      window.removeEventListener("toast", handleToast);
+    };
   }, []);
-
-  // 🧹 Cleanup orphan files + refresh
-  const cleanupAndRefresh = async () => {
-    try {
-      const res = await axios.post(`${API_BASE}/dataset/cleanup`);
-      console.log(`🧹 Cleaned ${res.data?.removed || 0} orphan files`);
-    } catch (e) {
-      console.warn("⚠️ Cleanup failed:", e);
-    }
-    await fetchSamples();
-  };
 
   // ⬇️ Download dataset ZIP
   const downloadDataset = async () => {
@@ -83,34 +82,32 @@ export default function DatasetManager() {
       const a = document.createElement("a");
       a.href = url;
       a.download = "MongolianWhisper_Dataset.zip";
-      document.body.appendChild(a);
       a.click();
-      a.remove();
       window.URL.revokeObjectURL(url);
-      console.log("✅ Dataset downloaded");
+      showToast("⬇️ Downloaded!");
     } catch (err) {
       console.error("❌ /dataset/export failed:", err);
-      alert("⚠️ Failed to download dataset ZIP.");
+      showToast("⚠️ Download failed.");
     }
   };
 
   return (
-    <div className="w-full flex flex-col items-center">
-      <h2 className="text-2xl font-bold text-blue-700 mb-4">
-        🗂️ Dataset Manager
-      </h2>
+    <div className="relative w-full flex flex-col items-center">
+      {/* ✅ Floating Toast */}
+      {toast && (
+        <div className="absolute top-2 z-50 bg-gray-900 text-white text-sm px-3 py-1 rounded-md shadow animate-fade">
+          {toast}
+        </div>
+      )}
 
-      {/* 🧾 Scrollable list container */}
-      <div className="w-full max-w-2xl bg-white rounded-lg shadow p-4 space-y-1 max-h-[480px] overflow-y-auto">
-        {loading && (
-          <p className="text-gray-600 animate-pulse">Loading samples...</p>
-        )}
+      <h2 className="text-2xl font-bold text-blue-700 mb-3">🗂️ Dataset Manager</h2>
+
+      {/* 🧾 Scrollable list */}
+      <div className="w-full max-w-2xl bg-white rounded-lg shadow p-3 space-y-1 max-h-[460px] overflow-y-auto">
+        {loading && <p className="text-gray-600 animate-pulse">Loading...</p>}
         {!loading && samples.length === 0 && (
-          <p className="text-gray-600">
-            No samples yet. Add from the Transcribe tab.
-          </p>
+          <p className="text-gray-600">No samples yet. Add from the Transcribe tab.</p>
         )}
-
         {samples.map((s) => (
           <Row
             key={s.file_name}
@@ -122,17 +119,17 @@ export default function DatasetManager() {
         ))}
       </div>
 
-      <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-4">
+      {/* 🔄 / ⬇️ Buttons */}
+      <div className="flex space-x-3 mt-4">
         <button
-          onClick={cleanupAndRefresh}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:scale-95"
+          onClick={fetchSamples}
+          className="px-4 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:scale-95 text-sm"
         >
-          🔄 Refresh & Clean
+          🔄 Refresh
         </button>
-
         <button
           onClick={downloadDataset}
-          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:scale-95"
+          className="px-4 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:scale-95 text-sm"
         >
           ⬇️ Download
         </button>
@@ -141,7 +138,7 @@ export default function DatasetManager() {
   );
 }
 
-// 🎵 Row Component — compact + icon-based
+// 🎵 Row Component (compact, icon-only, smooth)
 function Row({ fileName, initialText, onSave, onDelete }) {
   const [val, setVal] = useState(initialText || "");
   const [isRecording, setIsRecording] = useState(false);
@@ -150,7 +147,7 @@ function Row({ fileName, initialText, onSave, onDelete }) {
   const chunksRef = useRef([]);
   const audioRef = useRef(null);
 
-  // ▶️ / ⏹️ Play toggle
+  // ▶️ Play/Stop
   const handlePlay = async () => {
     try {
       if (isPlaying && audioRef.current) {
@@ -158,92 +155,84 @@ function Row({ fileName, initialText, onSave, onDelete }) {
         setIsPlaying(false);
         return;
       }
-
       const cleanName = fileName.replace(/^wavs\//, "");
-      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(
-        cleanName
-      )}`;
+      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(cleanName)}`;
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
       audio.playsInline = true;
       audio.onended = () => setIsPlaying(false);
       await audio.play();
       setIsPlaying(true);
-      console.log(`▶️ Playing: ${audioUrl}`);
     } catch (err) {
       console.error("Play error:", err);
-      alert("⚠️ Failed to play this recording.");
+      window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Play failed" }));
     }
   };
 
-  // 🎙️ / ⏹️ Re-record toggle
+  // 🎙️ Record/Stop toggle
   const handleRecord = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
       return;
     }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
-
       mediaRecorder.ondataavailable = (e) => chunksRef.current.push(e.data);
       mediaRecorder.onstop = async () => {
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         const fd = new FormData();
         fd.append("file", blob, "re_record.webm");
         fd.append("file_name", fileName);
-
         try {
           const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd, {
             headers: { "Content-Type": "multipart/form-data" },
           });
           if (res.data?.status === "ok") {
-            alert("✅ Re-recorded successfully!");
-          } else alert("⚠️ Re-record may not have succeeded.");
+            window.dispatchEvent(new CustomEvent("toast", { detail: "🎙️ Re-recorded" }));
+          }
         } catch (err) {
           console.error("❌ /dataset/update_audio failed:", err);
-          alert("⚠️ Failed to re-record audio.");
+          window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Record failed" }));
         }
       };
-
       mediaRecorder.start();
       setIsRecording(true);
-      console.log(`🎙️ Started re-recording for ${fileName}`);
     } catch (err) {
-      console.error("Mic access error:", err);
-      alert("⚠️ Microphone access denied or unavailable.");
+      console.error("Mic error:", err);
+      window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Mic access denied" }));
     }
   };
 
   return (
     <div className="flex items-center justify-between border-b border-gray-200 pb-1">
-      {/* Left side controls */}
       <div className="flex items-center space-x-2 w-full">
+        {/* ▶️ / ⏹️ */}
         <button
           onClick={handlePlay}
           className={`${
             isPlaying ? "bg-gray-500" : "bg-green-500"
           } text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
-          title={isPlaying ? "Stop playback" : "Play recording"}
+          title={isPlaying ? "Stop" : "Play"}
         >
           {isPlaying ? "⏹️" : "▶️"}
         </button>
 
+        {/* 🎙️ / ⏹️ */}
         <button
           onClick={handleRecord}
           className={`${
             isRecording ? "bg-red-600" : "bg-orange-500"
           } text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
-          title={isRecording ? "Stop recording" : "Re-record"}
+          title={isRecording ? "Stop" : "Re-record"}
         >
           {isRecording ? "⏹️" : "🎤"}
         </button>
 
-        {/* Single-line text field (longer text visible) */}
+        {/* 📝 Editable single line */}
         <input
           type="text"
           value={val}
@@ -257,10 +246,22 @@ function Row({ fileName, initialText, onSave, onDelete }) {
       <button
         onClick={onDelete}
         className="text-red-600 hover:text-red-800 ml-2 text-sm"
-        title="Delete this sample"
+        title="Delete sample"
       >
         🗑️
       </button>
     </div>
   );
 }
+
+/* ✨ Add to your global CSS or tailwind.css:
+@keyframes fade {
+  0% { opacity: 0; transform: translateY(-5px); }
+  10% { opacity: 1; transform: translateY(0); }
+  90% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-5px); }
+}
+.animate-fade {
+  animation: fade 1.8s ease-in-out;
+}
+*/
