@@ -31,13 +31,22 @@ export default function DatasetManager() {
 
   // ✅ Update text in CSV
   const updateText = async (file_name, new_text) => {
-    if (!new_text.trim()) return;
+    const clean = (new_text || "").trim();
+    if (!clean) return;
     const fd = new FormData();
     fd.append("file_name", file_name);
-    fd.append("new_text", new_text);
+    fd.append("new_text", clean);
     try {
       const res = await axios.post(`${API_BASE}/dataset/update`, fd);
-      if (res.data?.status === "ok") showToast("💾 Updated");
+      if (res.data?.status === "ok") {
+        // Update local state so list shows new text immediately
+        setSamples((prev) =>
+          prev.map((s) =>
+            s.file_name === file_name ? { ...s, text: clean } : s
+          )
+        );
+        showToast("💾 Updated");
+      }
     } catch (err) {
       console.error("❌ /dataset/update failed:", err);
       showToast("⚠️ Update failed.");
@@ -115,6 +124,7 @@ export default function DatasetManager() {
             initialText={s.text || s[" text"] || ""}
             onSave={(text) => updateText(s.file_name, text)}
             onDelete={() => deleteSample(s.file_name)}
+            onReplaced={fetchSamples}
           />
         ))}
       </div>
@@ -139,7 +149,7 @@ export default function DatasetManager() {
 }
 
 // 🎵 Row Component (compact, icon-only, smooth)
-function Row({ fileName, initialText, onSave, onDelete }) {
+function Row({ fileName, initialText, onSave, onDelete, onReplaced }) {
   const [val, setVal] = useState(initialText || "");
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -147,7 +157,12 @@ function Row({ fileName, initialText, onSave, onDelete }) {
   const chunksRef = useRef([]);
   const audioRef = useRef(null);
 
-  // ▶️ Play/Stop
+  const isiOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+  // ▶️ Play/Stop (ensure previous audio stops)
   const handlePlay = async () => {
     try {
       if (isPlaying && audioRef.current) {
@@ -155,6 +170,7 @@ function Row({ fileName, initialText, onSave, onDelete }) {
         setIsPlaying(false);
         return;
       }
+      audioRef.current?.pause();
       const cleanName = fileName.replace(/^wavs\//, "");
       const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(cleanName)}`;
       const audio = new Audio(audioUrl);
@@ -169,37 +185,58 @@ function Row({ fileName, initialText, onSave, onDelete }) {
     }
   };
 
-  // 🎙️ Record/Stop toggle
+  // 🎙️ Record/Stop toggle (mobile-safe mimetype)
   const handleRecord = async () => {
     if (isRecording) {
-      mediaRecorderRef.current?.stop();
+      try {
+        mediaRecorderRef.current?.requestData?.();
+        mediaRecorderRef.current?.stop();
+      } catch {}
       setIsRecording(false);
       return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      let mimeType = "audio/webm;codecs=opus";
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = "audio/webm";
+      if (isiOS || isSafari) mimeType = "audio/mp4"; // ✅ iOS/Safari AAC
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
-      mediaRecorder.ondataavailable = (e) => chunksRef.current.push(e.data);
+
+      mediaRecorder.ondataavailable = (e) => e.data && chunksRef.current.push(e.data);
+
       mediaRecorder.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        // Build final blob and send
+        let blob = new Blob(chunksRef.current, { type: mimeType });
+        if ((!blob.type || blob.size === 0) && (isiOS || isSafari)) {
+          blob = new Blob(chunksRef.current, { type: "audio/mp4" });
+        }
+
         const fd = new FormData();
-        fd.append("file", blob, "re_record.webm");
+        fd.append("file", blob, isiOS || isSafari ? "re_record.m4a" : "re_record.webm");
         fd.append("file_name", fileName);
+
         try {
           const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd, {
             headers: { "Content-Type": "multipart/form-data" },
           });
           if (res.data?.status === "ok") {
             window.dispatchEvent(new CustomEvent("toast", { detail: "🎙️ Re-recorded" }));
+            onReplaced?.();
+          } else {
+            window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Re-record failed" }));
           }
         } catch (err) {
           console.error("❌ /dataset/update_audio failed:", err);
           window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Record failed" }));
+        } finally {
+          stream.getTracks().forEach((t) => t.stop());
         }
       };
-      mediaRecorder.start();
+
+      mediaRecorder.start(150);
       setIsRecording(true);
     } catch (err) {
       console.error("Mic error:", err);

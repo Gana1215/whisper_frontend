@@ -12,22 +12,26 @@ export default function Recorder({ onStop }) {
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
 
-  // 🧭 Detect device type
+  // 🌍 Device detection
+  const isIOS = () =>
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isSafari = () =>
+    /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
   useEffect(() => {
-    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+    const isMobile = /Mobi|Android/i.test(navigator.userAgent) || isIOS();
     setDevice(isMobile ? "mobile" : "desktop");
   }, []);
 
-  // 🔓 iOS audio unlock
+  // 🎧 Unlock audio context (iOS requires touch)
   useEffect(() => {
     const unlock = () => {
       if (!audioCtxRef.current) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         audioCtxRef.current = new AudioCtx({ latencyHint: "interactive" });
       }
-      if (audioCtxRef.current.state === "suspended") {
-        audioCtxRef.current.resume();
-      }
+      if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
     };
     document.addEventListener("touchstart", unlock, { once: true });
     document.addEventListener("touchend", unlock, { once: true });
@@ -37,26 +41,39 @@ export default function Recorder({ onStop }) {
     };
   }, []);
 
-  // 🧹 Cleanup
+  // 🧹 Cleanup when unmounted
   useEffect(() => {
     return () => {
       cancelAnimationFrame(animationRef.current);
-      if (audioCtxRef.current) audioCtxRef.current.close().catch(() => {});
+      try {
+        audioCtxRef.current?.close();
+      } catch {}
     };
   }, []);
 
-  // 🎙️ Start recording — unified WebM across all devices
+  // 🛑 Stop if tab is hidden (mobile multitasking safety)
+  useEffect(() => {
+    const stopIfHidden = () => {
+      const rec = mediaRecorderRef.current;
+      if (document.hidden && rec && rec.state === "recording") rec.stop();
+    };
+    document.addEventListener("visibilitychange", stopIfHidden);
+    return () => document.removeEventListener("visibilitychange", stopIfHidden);
+  }, []);
+
+  // 🎙️ Start Recording
   const startRecording = async () => {
     if (recording) return;
     try {
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
+      let mimeType = "audio/webm;codecs=opus";
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = "audio/webm";
+      if (isIOS() || isSafari()) mimeType = "audio/mp4"; // ✅ iOS/Safari AAC
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
 
+      // 🎛️ Waveform setup
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const audioCtx =
         audioCtxRef.current || new AudioCtx({ latencyHint: "interactive" });
@@ -76,47 +93,52 @@ export default function Recorder({ onStop }) {
       };
 
       recorder.onstop = () => {
-        // ✅ Always produce WebM (no MP4 fallback)
-        const blob = new Blob(chunksRef.current, { type: mimeType });
+        // 🧩 Build final blob
+        let blob = new Blob(chunksRef.current, { type: mimeType });
+        if ((!blob.type || blob.size === 0) && (isIOS() || isSafari())) {
+          blob = new Blob(chunksRef.current, { type: "audio/mp4" });
+        }
+
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
+        console.log("🎧 Recorded:", blob.type, blob.size);
 
-        console.log("🎧 Recorded:", blob.type, "size:", blob.size);
+        // Notify parent (transcribe/save)
         onStop?.({ blob, device });
 
-        // Auto-play on desktop
+        // Desktop auto-play preview
         if (device === "desktop") {
           const auto = new Audio(url);
           auto.playsInline = true;
-          auto.play().catch((err) => console.warn("Auto-play blocked:", err));
+          auto.play().catch(() => {});
         }
 
         stream.getTracks().forEach((t) => t.stop());
         cancelAnimationFrame(animationRef.current);
       };
 
-      // Safari-friendly delayed start
+      // ✅ Small delay stabilizes first chunk on iOS
       setTimeout(() => {
-        recorder.start(100);
+        recorder.start(150);
         drawWaveform();
       }, 200);
     } catch (err) {
       console.error("🎤 Recording error:", err);
-      alert("Microphone permission denied or browser not supported.");
+      window.dispatchEvent(new CustomEvent("toast", { detail: "⚠️ Mic access denied" }));
     }
   };
 
-  // ⏹ Stop
+  // ⏹ Stop Recording
   const stopRecording = () => {
     const rec = mediaRecorderRef.current;
     if (rec && rec.state !== "inactive") {
       setRecording(false);
-      rec.requestData?.();
+      rec.requestData?.(); // flush Safari buffer
       rec.stop();
     }
   };
 
-  // 🎨 Waveform drawing
+  // 🎨 Waveform Visualization
   const drawWaveform = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
@@ -137,8 +159,7 @@ export default function Recorder({ onStop }) {
 
       for (let i = 0; i < bufferLength; i++) {
         const v = (dataArray[i] - 128) / 128;
-        const amplified = v * 4.0;
-        const y = canvas.height / 2 + amplified * (canvas.height / 2);
+        const y = canvas.height / 2 + v * 4 * (canvas.height / 2);
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         x += sliceWidth;
       }
@@ -150,16 +171,17 @@ export default function Recorder({ onStop }) {
     draw();
   };
 
-  // ▶️ Play
+  // ▶️ Play Recorded Audio
   const playRecording = () => {
     if (!audioUrl) return;
     const audio = new Audio(audioUrl);
     audio.playsInline = true;
-    audio.play().catch(() => {
-      alert("🔊 Tap again to allow playback (iOS requires interaction).");
-    });
+    audio.play().catch(() =>
+      window.dispatchEvent(new CustomEvent("toast", { detail: "🔊 Tap again to play" }))
+    );
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col items-center space-y-4 w-full">
       <canvas
