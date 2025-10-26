@@ -29,19 +29,33 @@ export default function DatasetManager() {
     }
   };
 
-  // ✅ Update text in CSV
+  // ✅ Update text in CSV (fixed NoneType issue)
   const updateText = async (file_name, new_text) => {
-    if (!new_text.trim()) return;
+    const cleanName = (file_name || "").trim();
+    const cleanText = (new_text || "").trim();
+    if (!cleanName || !cleanText) {
+      console.warn("⚠️ Missing file_name or new_text");
+      showToast("⚠️ Empty text ignored");
+      return;
+    }
+
     const fd = new FormData();
-    fd.append("file_name", file_name);
-    fd.append("new_text", new_text);
+    fd.append("file_name", cleanName);
+    fd.append("new_text", cleanText);
+
     try {
       const res = await axios.post(`${API_BASE}/dataset/update`, fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
+
       if (res.data?.status === "ok") {
         showToast("💾 Updated");
-        fetchSamples(); // 🔄 auto-refresh after edit
+        // Update immediately without waiting for refresh
+        setSamples((prev) =>
+          prev.map((s) =>
+            s.file_name === cleanName ? { ...s, text: cleanText } : s
+          )
+        );
       } else {
         console.warn("⚠️ Unexpected response:", res.data);
         showToast("⚠️ Update failed.");
