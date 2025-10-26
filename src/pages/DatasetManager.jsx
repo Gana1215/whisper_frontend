@@ -5,9 +5,6 @@ import { API_BASE } from "../utils/api";
 export default function DatasetManager() {
   const [samples, setSamples] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
 
   // ✅ Fetch dataset list
   const fetchSamples = async () => {
@@ -104,7 +101,7 @@ export default function DatasetManager() {
       </h2>
 
       {/* 🧾 Scrollable list container */}
-      <div className="w-full max-w-2xl bg-white rounded-lg shadow p-4 space-y-2 max-h-[480px] overflow-y-auto">
+      <div className="w-full max-w-2xl bg-white rounded-lg shadow p-4 space-y-1 max-h-[480px] overflow-y-auto">
         {loading && (
           <p className="text-gray-600 animate-pulse">Loading samples...</p>
         )}
@@ -130,44 +127,56 @@ export default function DatasetManager() {
           onClick={cleanupAndRefresh}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:scale-95"
         >
-          🔄 Refresh & Clean Orphans
+          🔄 Refresh & Clean
         </button>
 
         <button
           onClick={downloadDataset}
           className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:scale-95"
         >
-          ⬇️ Download Dataset
+          ⬇️ Download
         </button>
       </div>
     </div>
   );
 }
 
-// 🎵 Row Component
+// 🎵 Row Component — compact + icon-based
 function Row({ fileName, initialText, onSave, onDelete }) {
   const [val, setVal] = useState(initialText || "");
   const [isRecording, setIsRecording] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const audioRef = useRef(null);
 
+  // ▶️ / ⏹️ Play toggle
   const handlePlay = async () => {
     try {
+      if (isPlaying && audioRef.current) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+        return;
+      }
+
       const cleanName = fileName.replace(/^wavs\//, "");
       const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(
         cleanName
       )}`;
       const audio = new Audio(audioUrl);
+      audioRef.current = audio;
       audio.playsInline = true;
+      audio.onended = () => setIsPlaying(false);
       await audio.play();
+      setIsPlaying(true);
       console.log(`▶️ Playing: ${audioUrl}`);
     } catch (err) {
       console.error("Play error:", err);
-      alert("⚠️ Failed to play this recording. File may not exist.");
+      alert("⚠️ Failed to play this recording.");
     }
   };
 
-  // 🔁 Re-record logic
+  // 🎙️ / ⏹️ Re-record toggle
   const handleRecord = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -187,15 +196,14 @@ function Row({ fileName, initialText, onSave, onDelete }) {
         const fd = new FormData();
         fd.append("file", blob, "re_record.webm");
         fd.append("file_name", fileName);
+
         try {
           const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd, {
             headers: { "Content-Type": "multipart/form-data" },
           });
           if (res.data?.status === "ok") {
             alert("✅ Re-recorded successfully!");
-          } else {
-            alert("⚠️ Re-record may not have succeeded.");
-          }
+          } else alert("⚠️ Re-record may not have succeeded.");
         } catch (err) {
           console.error("❌ /dataset/update_audio failed:", err);
           alert("⚠️ Failed to re-record audio.");
@@ -212,46 +220,46 @@ function Row({ fileName, initialText, onSave, onDelete }) {
   };
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-200 pb-2">
+    <div className="flex items-center justify-between border-b border-gray-200 pb-1">
+      {/* Left side controls */}
       <div className="flex items-center space-x-2 w-full">
-        {/* ▶️ Play */}
         <button
           onClick={handlePlay}
-          className="bg-green-500 text-white rounded-full px-3 py-1 hover:bg-green-600 active:scale-95"
-          title="Play this recording"
+          className={`${
+            isPlaying ? "bg-gray-500" : "bg-green-500"
+          } text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
+          title={isPlaying ? "Stop playback" : "Play recording"}
         >
-          ▶️
+          {isPlaying ? "⏹️" : "▶️"}
         </button>
 
-        {/* 🎙️ Re-record */}
         <button
           onClick={handleRecord}
           className={`${
             isRecording ? "bg-red-600" : "bg-orange-500"
-          } text-white rounded-full px-3 py-1 hover:opacity-90 active:scale-95`}
-          title="Re-record this voice"
+          } text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
+          title={isRecording ? "Stop recording" : "Re-record"}
         >
-          {isRecording ? "⏹️ Stop" : "🎙️ Re-record"}
+          {isRecording ? "⏹️" : "🎤"}
         </button>
 
-        <div className="flex flex-col w-full">
-          <span className="text-xs text-gray-500 truncate">{fileName}</span>
-          <textarea
-            value={val}
-            onChange={(e) => setVal(e.target.value)}
-            onBlur={() => onSave(val)}
-            rows={2}
-            className="border p-2 rounded w-full resize-y min-h-[48px] focus:ring focus:ring-blue-200"
-          />
-        </div>
+        {/* Single-line text field (longer text visible) */}
+        <input
+          type="text"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => onSave(val)}
+          className="border p-1 rounded w-full text-sm truncate focus:ring focus:ring-blue-200"
+        />
       </div>
 
+      {/* 🗑️ Delete */}
       <button
         onClick={onDelete}
-        className="text-red-600 hover:text-red-800 hover:underline mt-2 sm:mt-0 sm:ml-4"
+        className="text-red-600 hover:text-red-800 ml-2 text-sm"
         title="Delete this sample"
       >
-        🗑️ Delete
+        🗑️
       </button>
     </div>
   );
