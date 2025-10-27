@@ -1,7 +1,8 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.1.3 — Auto-Expand Edition)
-// ✅ Text field auto-expands smoothly while editing
-// ✅ All other logic fully untouched
+// 🎙️ DatasetManager.jsx (v4.1.4 — Full-Width Auto-Expand Edition)
+// ✅ Text field expands to trash icon width
+// ✅ Smooth transition while editing
+// ✅ No other logic touched
 // ===============================================
 
 import React, { useEffect, useState, useRef } from "react";
@@ -292,7 +293,7 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
           {editing ? "✔️" : "✏️"}
         </button>
 
-        {/* ✅ Auto-expand Text Field */}
+        {/* ✅ Full-width Auto-expand Text Field */}
         <input
           type="text"
           value={val}
@@ -303,8 +304,11 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
           } focus:ring focus:ring-blue-200 focus:outline-none overflow-x-auto`}
           style={{
             fontSize: "0.95rem",
-            width: editing ? "clamp(320px, 60ch, 520px)" : "clamp(260px, 50ch, 420px)",
+            flex: 1,
+            maxWidth: "calc(100% - 90px)",
+            minWidth: "320px",
             letterSpacing: "0.2px",
+            width: editing ? "clamp(360px, 65ch, 600px)" : "clamp(300px, 55ch, 520px)",
           }}
         />
       </div>
