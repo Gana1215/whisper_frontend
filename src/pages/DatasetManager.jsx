@@ -1,6 +1,6 @@
 // ===============================================
 // 🎙️ DatasetManager.jsx (v4.1.4 — Full-Width Auto-Expand Edition)
-// ✅ Text field expands to trash icon width
+// ✅ Text field expands to trash icon width (≈20–30+ chars visible)
 // ✅ Smooth transition while editing
 // ✅ No other logic touched
 // ===============================================
@@ -304,11 +304,13 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
           } focus:ring focus:ring-blue-200 focus:outline-none overflow-x-auto`}
           style={{
             fontSize: "0.95rem",
-            flex: 1,
-            maxWidth: "calc(100% - 90px)",
-            minWidth: "320px",
+            flex: 1,                         // take remaining row space
+            maxWidth: "calc(100% - 90px)",   // leave room for icons + gaps
+            minWidth: "340px",               // ensure ~20–30 chars visible on small screens
             letterSpacing: "0.2px",
-            width: editing ? "clamp(360px, 65ch, 600px)" : "clamp(300px, 55ch, 520px)",
+            width: editing
+              ? "clamp(380px, 70ch, 640px)"  // grow a bit when editing
+              : "clamp(320px, 60ch, 560px)", // comfortable default width
           }}
         />
       </div>
