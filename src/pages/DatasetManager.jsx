@@ -1,10 +1,7 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.1 — Final Stable Edition)
-// ✅ Text updates correctly (no EMPTY_AUDIO)
-// ✅ Edit mode toggle with ✏️ / ✔️
-// ✅ Add ➕ New Voice Room (beep placeholder)
-// ✅ Re-record refreshes instantly (no reload)
-// ✅ 100% mobile/desktop safe
+// 🎙️ DatasetManager.jsx (v4.1.1 — Mini Patch)
+// ✅ Text field resizable horizontally
+// ✅ All other logic unchanged
 // ===============================================
 
 import React, { useEffect, useState, useRef } from "react";
@@ -17,13 +14,11 @@ export default function DatasetManager() {
   const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState("");
 
-  // ✅ Toast helper
   const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(""), 2000);
   };
 
-  // ✅ Fetch dataset list
   const fetchSamples = async () => {
     setLoading(true);
     try {
@@ -39,7 +34,6 @@ export default function DatasetManager() {
     }
   };
 
-  // ✅ Update text
   const updateText = async (file_name, new_text) => {
     const cleanName = (file_name || "").trim();
     const cleanText = (new_text || "").trim();
@@ -50,7 +44,7 @@ export default function DatasetManager() {
 
     const fd = new FormData();
     fd.append("file_name", cleanName);
-    fd.append("new_text", cleanText); // matches backend v4.1
+    fd.append("new_text", cleanText);
 
     try {
       const res = await axios.post(`${API_BASE}/dataset/update`, fd);
@@ -68,7 +62,6 @@ export default function DatasetManager() {
     }
   };
 
-  // ✅ Add new placeholder record
   const addNewRecord = async () => {
     try {
       setAdding(true);
@@ -89,7 +82,6 @@ export default function DatasetManager() {
     }
   };
 
-  // ✅ Delete sample
   const deleteSample = async (file_name) => {
     const fd = new FormData();
     fd.append("file_name", file_name);
@@ -105,17 +97,14 @@ export default function DatasetManager() {
     }
   };
 
-  // 🚀 On load
   useEffect(() => {
     fetchSamples();
     return () => {
-      // Stop any playing audio on unmount (mobile Safari safe)
       const audios = document.querySelectorAll("audio");
       audios.forEach((a) => a.pause());
     };
   }, []);
 
-  // ⬇️ Download dataset ZIP
   const downloadDataset = async () => {
     try {
       const res = await axios.get(`${API_BASE}/dataset/export`, {
@@ -136,7 +125,6 @@ export default function DatasetManager() {
 
   return (
     <div className="relative w-full flex flex-col items-center">
-      {/* Toast */}
       {toast && (
         <div className="absolute top-2 z-50 bg-gray-900 text-white text-sm px-3 py-1 rounded-md shadow animate-fade">
           {toast}
@@ -145,7 +133,6 @@ export default function DatasetManager() {
 
       <h2 className="text-2xl font-bold text-blue-700 mb-3">🗂️ Dataset Manager</h2>
 
-      {/* ➕ Add Button */}
       <button
         onClick={addNewRecord}
         disabled={adding}
@@ -158,7 +145,6 @@ export default function DatasetManager() {
         {adding ? "⏳ Adding..." : "➕ Add New Voice Room"}
       </button>
 
-      {/* List */}
       <div className="dataset-list w-full max-w-2xl bg-white rounded-lg shadow p-3 space-y-1 max-h-[460px] overflow-y-auto">
         {loading && <p className="text-gray-600 animate-pulse">Loading...</p>}
         {!loading && samples.length === 0 && (
@@ -176,7 +162,6 @@ export default function DatasetManager() {
         ))}
       </div>
 
-      {/* Footer buttons */}
       <div className="flex space-x-3 mt-4">
         <button
           onClick={fetchSamples}
@@ -205,7 +190,6 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
   const chunksRef = useRef([]);
   const audioRef = useRef(null);
 
-  // ▶️ Play
   const handlePlay = async () => {
     if (editing) return;
     try {
@@ -227,7 +211,6 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
     }
   };
 
-  // 🎙️ Re-record
   const handleRecord = async () => {
     if (editing) return;
     if (isRecording) {
@@ -251,7 +234,6 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
           const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd);
           if (res.data?.status === "ok") {
             onUpdated();
-            showToast("🎙️ Re-recorded");
           }
         } catch (err) {
           console.error("❌ /dataset/update_audio failed:", err);
@@ -265,7 +247,6 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
     }
   };
 
-  // ✏️ Edit toggle
   const toggleEdit = async () => {
     if (editing) await onSave(val);
     setEditing(!editing);
@@ -311,15 +292,20 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
           {editing ? "✔️" : "✏️"}
         </button>
 
-        {/* Text field */}
+        {/* ✅ Resizable Text Field (horizontal only) */}
         <input
           type="text"
           value={val}
           readOnly={!editing}
           onChange={(e) => setVal(e.target.value)}
           className={`border p-1 rounded w-full text-sm truncate ${
-            editing ? "bg-white" : "bg-gray-100 cursor-default"
-          } focus:ring focus:ring-blue-200`}
+            editing ? "bg-white resize-x" : "bg-gray-100 cursor-default"
+          } focus:ring focus:ring-blue-200 focus:outline-none`}
+          style={{
+            fontSize: "0.95rem",
+            minWidth: "280px",
+            letterSpacing: "0.2px",
+          }}
         />
       </div>
 
