@@ -1,9 +1,10 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.0 — Enhanced Edition)
-// ✅ Fix: text updates correctly (no "EMPTY_AUDIO")
-// ✅ Add: ✏️ edit mode with lock/unlock
-// ✅ Add: ➕ new record (placeholder beep)
-// ✅ Fully mobile-safe
+// 🎙️ DatasetManager.jsx (v4.1 — Final Stable Edition)
+// ✅ Text updates correctly (no EMPTY_AUDIO)
+// ✅ Edit mode toggle with ✏️ / ✔️
+// ✅ Add ➕ New Voice Room (beep placeholder)
+// ✅ Re-record refreshes instantly (no reload)
+// ✅ 100% mobile/desktop safe
 // ===============================================
 
 import React, { useEffect, useState, useRef } from "react";
@@ -13,6 +14,7 @@ import { API_BASE } from "../utils/api";
 export default function DatasetManager() {
   const [samples, setSamples] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState("");
 
   // ✅ Toast helper
@@ -37,7 +39,7 @@ export default function DatasetManager() {
     }
   };
 
-  // ✅ Update text in CSV (fixed key)
+  // ✅ Update text
   const updateText = async (file_name, new_text) => {
     const cleanName = (file_name || "").trim();
     const cleanText = (new_text || "").trim();
@@ -48,23 +50,18 @@ export default function DatasetManager() {
 
     const fd = new FormData();
     fd.append("file_name", cleanName);
-    fd.append("text", cleanText); // ✅ FIXED key
+    fd.append("new_text", cleanText); // matches backend v4.1
 
     try {
-      const res = await axios.post(`${API_BASE}/dataset/update`, fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-
+      const res = await axios.post(`${API_BASE}/dataset/update`, fd);
       if (res.data?.status === "ok") {
-        showToast("💾 Updated");
+        showToast("💾 Text updated");
         setSamples((prev) =>
           prev.map((s) =>
             s.file_name === cleanName ? { ...s, text: cleanText } : s
           )
         );
-      } else {
-        showToast("⚠️ Update failed.");
-      }
+      } else showToast("⚠️ Update failed.");
     } catch (err) {
       console.error("❌ /dataset/update failed:", err);
       showToast("⚠️ Update failed.");
@@ -74,14 +71,21 @@ export default function DatasetManager() {
   // ✅ Add new placeholder record
   const addNewRecord = async () => {
     try {
+      setAdding(true);
       const res = await axios.post(`${API_BASE}/dataset/add_empty`);
       if (res.data?.status === "ok") {
-        showToast("➕ Added new record");
-        fetchSamples();
+        showToast("➕ Added new voice room");
+        await fetchSamples();
+        setTimeout(() => {
+          const list = document.querySelector(".dataset-list");
+          if (list) list.scrollTop = list.scrollHeight;
+        }, 200);
       } else showToast("⚠️ Add failed.");
     } catch (err) {
       console.error("❌ /dataset/add_empty failed:", err);
       showToast("⚠️ Add failed.");
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -104,9 +108,10 @@ export default function DatasetManager() {
   // 🚀 On load
   useEffect(() => {
     fetchSamples();
-    window.addEventListener("dataset-updated", fetchSamples);
     return () => {
-      window.removeEventListener("dataset-updated", fetchSamples);
+      // Stop any playing audio on unmount (mobile Safari safe)
+      const audios = document.querySelectorAll("audio");
+      audios.forEach((a) => a.pause());
     };
   }, []);
 
@@ -131,6 +136,7 @@ export default function DatasetManager() {
 
   return (
     <div className="relative w-full flex flex-col items-center">
+      {/* Toast */}
       {toast && (
         <div className="absolute top-2 z-50 bg-gray-900 text-white text-sm px-3 py-1 rounded-md shadow animate-fade">
           {toast}
@@ -142,16 +148,21 @@ export default function DatasetManager() {
       {/* ➕ Add Button */}
       <button
         onClick={addNewRecord}
-        className="mb-3 px-4 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 active:scale-95 text-sm"
+        disabled={adding}
+        className={`mb-3 px-4 py-2 text-white rounded-lg text-sm ${
+          adding
+            ? "bg-gray-400 cursor-not-allowed"
+            : "bg-green-600 hover:bg-green-700 active:scale-95"
+        }`}
       >
-        ➕ Add New Record
+        {adding ? "⏳ Adding..." : "➕ Add New Voice Room"}
       </button>
 
-      {/* 🧾 Scrollable list */}
-      <div className="w-full max-w-2xl bg-white rounded-lg shadow p-3 space-y-1 max-h-[460px] overflow-y-auto">
+      {/* List */}
+      <div className="dataset-list w-full max-w-2xl bg-white rounded-lg shadow p-3 space-y-1 max-h-[460px] overflow-y-auto">
         {loading && <p className="text-gray-600 animate-pulse">Loading...</p>}
         {!loading && samples.length === 0 && (
-          <p className="text-gray-600">No samples yet. Add from the Transcribe tab.</p>
+          <p className="text-gray-600">No samples yet. Add new voice room.</p>
         )}
         {samples.map((s) => (
           <Row
@@ -160,11 +171,12 @@ export default function DatasetManager() {
             initialText={s.text || s[" text"] || ""}
             onSave={(text) => updateText(s.file_name, text)}
             onDelete={() => deleteSample(s.file_name)}
+            onUpdated={fetchSamples}
           />
         ))}
       </div>
 
-      {/* 🔄 / ⬇️ Buttons */}
+      {/* Footer buttons */}
       <div className="flex space-x-3 mt-4">
         <button
           onClick={fetchSamples}
@@ -183,8 +195,8 @@ export default function DatasetManager() {
   );
 }
 
-// 🎵 Row Component (Compact, editable, mobile-safe)
-function Row({ fileName, initialText, onSave, onDelete }) {
+// 🎵 Row Component
+function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
   const [val, setVal] = useState(initialText || "");
   const [editing, setEditing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -195,7 +207,7 @@ function Row({ fileName, initialText, onSave, onDelete }) {
 
   // ▶️ Play
   const handlePlay = async () => {
-    if (editing) return; // disable while editing
+    if (editing) return;
     try {
       if (isPlaying && audioRef.current) {
         audioRef.current.pause();
@@ -217,7 +229,7 @@ function Row({ fileName, initialText, onSave, onDelete }) {
 
   // 🎙️ Re-record
   const handleRecord = async () => {
-    if (editing) return; // disable while editing
+    if (editing) return;
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
@@ -237,7 +249,10 @@ function Row({ fileName, initialText, onSave, onDelete }) {
         fd.append("file_name", fileName);
         try {
           const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd);
-          if (res.data?.status === "ok") window.location.reload();
+          if (res.data?.status === "ok") {
+            onUpdated();
+            showToast("🎙️ Re-recorded");
+          }
         } catch (err) {
           console.error("❌ /dataset/update_audio failed:", err);
         }
@@ -250,11 +265,9 @@ function Row({ fileName, initialText, onSave, onDelete }) {
     }
   };
 
-  // 📝 Toggle edit
+  // ✏️ Edit toggle
   const toggleEdit = async () => {
-    if (editing) {
-      await onSave(val);
-    }
+    if (editing) await onSave(val);
     setEditing(!editing);
   };
 
