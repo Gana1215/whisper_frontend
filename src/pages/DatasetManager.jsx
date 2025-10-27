@@ -1,7 +1,7 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.1.1 — Mini Patch)
-// ✅ Text field resizable horizontally
-// ✅ All other logic unchanged
+// 🎙️ DatasetManager.jsx (v4.1.3 — Auto-Expand Edition)
+// ✅ Text field auto-expands smoothly while editing
+// ✅ All other logic fully untouched
 // ===============================================
 
 import React, { useEffect, useState, useRef } from "react";
@@ -292,18 +292,18 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
           {editing ? "✔️" : "✏️"}
         </button>
 
-        {/* ✅ Resizable Text Field (horizontal only) */}
+        {/* ✅ Auto-expand Text Field */}
         <input
           type="text"
           value={val}
           readOnly={!editing}
           onChange={(e) => setVal(e.target.value)}
-          className={`border p-1 rounded w-full text-sm truncate ${
-            editing ? "bg-white resize-x" : "bg-gray-100 cursor-default"
-          } focus:ring focus:ring-blue-200 focus:outline-none`}
+          className={`border p-1 rounded text-sm truncate transition-all duration-300 ease-in-out ${
+            editing ? "bg-white" : "bg-gray-100 cursor-default"
+          } focus:ring focus:ring-blue-200 focus:outline-none overflow-x-auto`}
           style={{
             fontSize: "0.95rem",
-            minWidth: "280px",
+            width: editing ? "clamp(320px, 60ch, 520px)" : "clamp(260px, 50ch, 420px)",
             letterSpacing: "0.2px",
           }}
         />
