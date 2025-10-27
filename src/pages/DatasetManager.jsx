@@ -1,7 +1,8 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.1.4 — Full-Width Auto-Expand Edition)
+// 🎙️ DatasetManager.jsx (v4.1.4 — Full-Width Auto-Expand Edition + Download Fix)
 // ✅ Text field expands to trash icon width (≈20–30+ chars visible)
 // ✅ Smooth transition while editing
+// ✅ Download uses cache-buster, validates content-type, respects server filename
 // ✅ No other logic touched
 // ===============================================
 
@@ -106,17 +107,32 @@ export default function DatasetManager() {
     };
   }, []);
 
+  // ✅ Download: cache-bust, validate content-type, respect server filename
   const downloadDataset = async () => {
     try {
       const res = await axios.get(`${API_BASE}/dataset/export`, {
         responseType: "blob",
+        headers: { "Cache-Control": "no-cache" },
+        params: { _: Date.now() }, // cache-buster
       });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+
+      const ct = (res.headers["content-type"] || "").toLowerCase();
+      if (!ct.includes("application/zip")) {
+        const text = await new Response(res.data).text().catch(() => "");
+        showToast(text || "⚠️ Download error.");
+        return;
+      }
+
+      const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "MongolianWhisper_Dataset.zip";
+
+      const cd = res.headers["content-disposition"] || "";
+      const match = cd.match(/filename="?([^"]+)"?/i);
+      a.download = match?.[1] || "MongolianWhisper_Dataset.zip";
+
       a.click();
-      window.URL.revokeObjectURL(url);
+      URL.revokeObjectURL(url);
       showToast("⬇️ Downloaded!");
     } catch (err) {
       console.error("❌ /dataset/export failed:", err);
