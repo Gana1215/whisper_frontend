@@ -1,8 +1,8 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.1.5 — Record Counter + 15ch Width)
-// ✅ Shows "Record X / N" (updates on add/delete/play/edit/focus)
-// ✅ Text field shows ~15 chars; grows a bit while editing
-// ✅ Download fix & all other logic unchanged
+// 🎙️ DatasetManager.jsx (v4.1.6 — Safe Delete Confirmation)
+// ✅ Adds confirmation alert before delete (OK / Cancel)
+// ✅ Cancel = no action; OK = proceeds to delete
+// ✅ All other logic untouched
 // ===============================================
 
 import React, { useEffect, useState, useRef } from "react";
@@ -14,7 +14,7 @@ export default function DatasetManager() {
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState("");
-  const [currentIdx, setCurrentIdx] = useState(null); // ✅ patch: current record index
+  const [currentIdx, setCurrentIdx] = useState(null);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -29,7 +29,6 @@ export default function DatasetManager() {
       });
       const rows = res.data?.samples || [];
       setSamples(rows);
-      // keep current index in bounds after refresh
       setCurrentIdx((idx) =>
         idx == null ? null : Math.min(idx, Math.max(0, rows.length - 1))
       );
@@ -76,12 +75,10 @@ export default function DatasetManager() {
       if (res.data?.status === "ok") {
         showToast("➕ Added new voice room");
         await fetchSamples();
-        // ✅ scroll to bottom and set current to last (new record)
         setTimeout(() => {
           const list = document.querySelector(".dataset-list");
           if (list) list.scrollTop = list.scrollHeight;
           setCurrentIdx((rowsLen) => {
-            // after fetchSamples, state is updated; grab length from DOM list
             const len = document.querySelectorAll(".dataset-list .row-item").length;
             return len ? len - 1 : null;
           });
@@ -95,7 +92,13 @@ export default function DatasetManager() {
     }
   };
 
+  // 🧩 PATCH START — added confirmation
   const deleteSample = async (file_name) => {
+    const confirmDelete = window.confirm(
+      `⚠️ Are you sure you want to delete "${file_name}"?\nThis action cannot be undone.`
+    );
+    if (!confirmDelete) return; // user cancelled
+
     const fd = new FormData();
     fd.append("file_name", file_name);
     try {
@@ -104,7 +107,6 @@ export default function DatasetManager() {
         setSamples((prev) => {
           const idx = prev.findIndex((s) => s.file_name === file_name);
           const next = prev.filter((s) => s.file_name !== file_name);
-          // ✅ keep current index sane
           if (idx !== -1) {
             const newIdx = Math.min(idx, Math.max(0, next.length - 1));
             setCurrentIdx(next.length ? newIdx : null);
@@ -118,6 +120,7 @@ export default function DatasetManager() {
       showToast("⚠️ Delete failed.");
     }
   };
+  // 🧩 PATCH END
 
   useEffect(() => {
     fetchSamples();
@@ -127,7 +130,6 @@ export default function DatasetManager() {
     };
   }, []);
 
-  // ✅ Download: cache-bust, validate content-type, respect server filename
   const downloadDataset = async () => {
     try {
       const res = await axios.get(`${API_BASE}/dataset/export`, {
@@ -171,7 +173,6 @@ export default function DatasetManager() {
 
       <h2 className="text-2xl font-bold text-blue-700 mb-1">🗂️ Dataset Manager</h2>
 
-      {/* ✅ patch: record counter */}
       <div className="text-sm text-gray-700 mb-2">
         {total > 0 ? (
           currentHuman ? (
@@ -210,7 +211,7 @@ export default function DatasetManager() {
             onSave={(text) => updateText(s.file_name, text)}
             onDelete={() => deleteSample(s.file_name)}
             onUpdated={fetchSamples}
-            onFocusRow={() => setCurrentIdx(i)} // ✅ track current
+            onFocusRow={() => setCurrentIdx(i)}
           />
         ))}
       </div>
@@ -233,7 +234,7 @@ export default function DatasetManager() {
   );
 }
 
-// 🎵 Row Component
+// 🎵 Row Component — unchanged
 function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocusRow }) {
   const [val, setVal] = useState(initialText || "");
   const [editing, setEditing] = useState(false);
@@ -246,14 +247,14 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
   const handlePlay = async () => {
     if (editing) return;
     try {
-      onFocusRow?.(); // ✅ mark current on play
+      onFocusRow?.();
       if (isPlaying && audioRef.current) {
         audioRef.current.pause();
         setIsPlaying(false);
         return;
       }
       const cleanName = fileName.replace(/^wavs\//, "");
-      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(cleanName)}?_=${Date.now()}`; // small cache-bust for stale audio
+      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(cleanName)}?_=${Date.now()}`;
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
       audio.playsInline = true;
@@ -273,7 +274,7 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
       return;
     }
     try {
-      onFocusRow?.(); // ✅ mark current on record start
+      onFocusRow?.();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -287,9 +288,7 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
         fd.append("file_name", fileName);
         try {
           const res = await axios.post(`${API_BASE}/dataset/update_audio`, fd);
-          if (res.data?.status === "ok") {
-            onUpdated();
-          }
+          if (res.data?.status === "ok") onUpdated();
         } catch (err) {
           console.error("❌ /dataset/update_audio failed:", err);
         }
@@ -305,50 +304,40 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
   const toggleEdit = async () => {
     if (editing) await onSave(val);
     setEditing(!editing);
-    onFocusRow?.(); // ✅ mark current on edit toggle
+    onFocusRow?.();
   };
 
   return (
     <div className="row-item flex items-center justify-between border-b border-gray-200 pb-1">
       <div className="flex items-center space-x-2 w-full" onMouseDown={onFocusRow} onFocus={onFocusRow}>
-        {/* ▶️ */}
         <button
           onClick={handlePlay}
           disabled={editing}
-          className={`${
-            isPlaying ? "bg-gray-500" : "bg-green-500"
-          } text-white rounded-full w-7 h-7 flex items-center justify-center ${
+          className={`${isPlaying ? "bg-gray-500" : "bg-green-500"} text-white rounded-full w-7 h-7 flex items-center justify-center ${
             editing ? "opacity-50 cursor-not-allowed" : "hover:opacity-90 active:scale-95"
           }`}
         >
           {isPlaying ? "⏹️" : "▶️"}
         </button>
 
-        {/* 🎙️ */}
         <button
           onClick={handleRecord}
           disabled={editing}
-          className={`${
-            isRecording ? "bg-red-600" : "bg-orange-500"
-          } text-white rounded-full w-7 h-7 flex items-center justify-center ${
+          className={`${isRecording ? "bg-red-600" : "bg-orange-500"} text-white rounded-full w-7 h-7 flex items-center justify-center ${
             editing ? "opacity-50 cursor-not-allowed" : "hover:opacity-90 active:scale-95"
           }`}
         >
           {isRecording ? "⏹️" : "🎤"}
         </button>
 
-        {/* ✏️ / ✔️ */}
         <button
           onClick={toggleEdit}
-          className={`${
-            editing ? "bg-blue-600" : "bg-gray-400"
-          } text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
+          className={`${editing ? "bg-blue-600" : "bg-gray-400"} text-white rounded-full w-7 h-7 flex items-center justify-center hover:opacity-90 active:scale-95`}
           title={editing ? "Save" : "Edit text"}
         >
           {editing ? "✔️" : "✏️"}
         </button>
 
-        {/* ✅ 15ch-focused Text Field (auto-expands a bit while editing) */}
         <input
           type="text"
           value={val}
@@ -361,7 +350,6 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
           style={{
             fontSize: "0.95rem",
             flex: 1,
-            // ~15 characters visible baseline; expand modestly when editing
             width: editing ? "clamp(220px, 18ch, 420px)" : "clamp(200px, 15ch, 360px)",
             minWidth: "200px",
             maxWidth: "calc(100% - 90px)",
@@ -370,7 +358,6 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
         />
       </div>
 
-      {/* 🗑️ */}
       <button
         onClick={onDelete}
         className="text-red-600 hover:text-red-800 ml-2 text-sm"
