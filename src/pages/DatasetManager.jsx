@@ -1,9 +1,8 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.1.4 — Full-Width Auto-Expand Edition + Download Fix)
-// ✅ Text field expands to trash icon width (≈20–30+ chars visible)
-// ✅ Smooth transition while editing
-// ✅ Download uses cache-buster, validates content-type, respects server filename
-// ✅ No other logic touched
+// 🎙️ DatasetManager.jsx (v4.1.5 — Record Counter + 15ch Width)
+// ✅ Shows "Record X / N" (updates on add/delete/play/edit/focus)
+// ✅ Text field shows ~15 chars; grows a bit while editing
+// ✅ Download fix & all other logic unchanged
 // ===============================================
 
 import React, { useEffect, useState, useRef } from "react";
@@ -15,6 +14,7 @@ export default function DatasetManager() {
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState("");
+  const [currentIdx, setCurrentIdx] = useState(null); // ✅ patch: current record index
 
   const showToast = (msg) => {
     setToast(msg);
@@ -27,7 +27,12 @@ export default function DatasetManager() {
       const res = await axios.get(`${API_BASE}/dataset/list?_=${Date.now()}`, {
         headers: { "Cache-Control": "no-cache" },
       });
-      setSamples(res.data?.samples || []);
+      const rows = res.data?.samples || [];
+      setSamples(rows);
+      // keep current index in bounds after refresh
+      setCurrentIdx((idx) =>
+        idx == null ? null : Math.min(idx, Math.max(0, rows.length - 1))
+      );
     } catch (err) {
       console.error("❌ /dataset/list failed:", err);
       showToast("⚠️ Failed to load dataset list.");
@@ -71,9 +76,15 @@ export default function DatasetManager() {
       if (res.data?.status === "ok") {
         showToast("➕ Added new voice room");
         await fetchSamples();
+        // ✅ scroll to bottom and set current to last (new record)
         setTimeout(() => {
           const list = document.querySelector(".dataset-list");
           if (list) list.scrollTop = list.scrollHeight;
+          setCurrentIdx((rowsLen) => {
+            // after fetchSamples, state is updated; grab length from DOM list
+            const len = document.querySelectorAll(".dataset-list .row-item").length;
+            return len ? len - 1 : null;
+          });
         }, 200);
       } else showToast("⚠️ Add failed.");
     } catch (err) {
@@ -90,7 +101,16 @@ export default function DatasetManager() {
     try {
       const res = await axios.post(`${API_BASE}/dataset/delete`, fd);
       if (res.data?.status === "ok") {
-        setSamples((prev) => prev.filter((s) => s.file_name !== file_name));
+        setSamples((prev) => {
+          const idx = prev.findIndex((s) => s.file_name === file_name);
+          const next = prev.filter((s) => s.file_name !== file_name);
+          // ✅ keep current index sane
+          if (idx !== -1) {
+            const newIdx = Math.min(idx, Math.max(0, next.length - 1));
+            setCurrentIdx(next.length ? newIdx : null);
+          }
+          return next;
+        });
         showToast("🗑️ Deleted");
       } else showToast("⚠️ Delete failed.");
     } catch (err) {
@@ -113,7 +133,7 @@ export default function DatasetManager() {
       const res = await axios.get(`${API_BASE}/dataset/export`, {
         responseType: "blob",
         headers: { "Cache-Control": "no-cache" },
-        params: { _: Date.now() }, // cache-buster
+        params: { _: Date.now() },
       });
 
       const ct = (res.headers["content-type"] || "").toLowerCase();
@@ -126,11 +146,9 @@ export default function DatasetManager() {
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
-
       const cd = res.headers["content-disposition"] || "";
       const match = cd.match(/filename="?([^"]+)"?/i);
       a.download = match?.[1] || "MongolianWhisper_Dataset.zip";
-
       a.click();
       URL.revokeObjectURL(url);
       showToast("⬇️ Downloaded!");
@@ -140,6 +158,9 @@ export default function DatasetManager() {
     }
   };
 
+  const total = samples.length;
+  const currentHuman = currentIdx != null ? currentIdx + 1 : null;
+
   return (
     <div className="relative w-full flex flex-col items-center">
       {toast && (
@@ -148,7 +169,20 @@ export default function DatasetManager() {
         </div>
       )}
 
-      <h2 className="text-2xl font-bold text-blue-700 mb-3">🗂️ Dataset Manager</h2>
+      <h2 className="text-2xl font-bold text-blue-700 mb-1">🗂️ Dataset Manager</h2>
+
+      {/* ✅ patch: record counter */}
+      <div className="text-sm text-gray-700 mb-2">
+        {total > 0 ? (
+          currentHuman ? (
+            <>Record <span className="font-semibold">{currentHuman}</span> / {total}</>
+          ) : (
+            <>Total records: <span className="font-semibold">{total}</span></>
+          )
+        ) : (
+          <>No records</>
+        )}
+      </div>
 
       <button
         onClick={addNewRecord}
@@ -162,19 +196,21 @@ export default function DatasetManager() {
         {adding ? "⏳ Adding..." : "➕ Add New Voice Room"}
       </button>
 
-      <div className="dataset-list w-full max-w-2xl bg-white rounded-lg shadow p-3 space-y-1 max-h-[460px] overflow-y-auto">
+      <div className="dataset-list w-full max-w-2xl bg-white rounded-lg shadow p-3 space-y-1 max-h=[460px] max-h-[460px] overflow-y-auto">
         {loading && <p className="text-gray-600 animate-pulse">Loading...</p>}
         {!loading && samples.length === 0 && (
           <p className="text-gray-600">No samples yet. Add new voice room.</p>
         )}
-        {samples.map((s) => (
+        {samples.map((s, i) => (
           <Row
             key={s.file_name}
+            index={i}
             fileName={s.file_name}
             initialText={s.text || s[" text"] || ""}
             onSave={(text) => updateText(s.file_name, text)}
             onDelete={() => deleteSample(s.file_name)}
             onUpdated={fetchSamples}
+            onFocusRow={() => setCurrentIdx(i)} // ✅ track current
           />
         ))}
       </div>
@@ -198,7 +234,7 @@ export default function DatasetManager() {
 }
 
 // 🎵 Row Component
-function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
+function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocusRow }) {
   const [val, setVal] = useState(initialText || "");
   const [editing, setEditing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -210,13 +246,14 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
   const handlePlay = async () => {
     if (editing) return;
     try {
+      onFocusRow?.(); // ✅ mark current on play
       if (isPlaying && audioRef.current) {
         audioRef.current.pause();
         setIsPlaying(false);
         return;
       }
       const cleanName = fileName.replace(/^wavs\//, "");
-      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(cleanName)}`;
+      const audioUrl = `${API_BASE}/record_archive/wavs/${encodeURIComponent(cleanName)}?_=${Date.now()}`; // small cache-bust for stale audio
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
       audio.playsInline = true;
@@ -236,6 +273,7 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
       return;
     }
     try {
+      onFocusRow?.(); // ✅ mark current on record start
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -267,11 +305,12 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
   const toggleEdit = async () => {
     if (editing) await onSave(val);
     setEditing(!editing);
+    onFocusRow?.(); // ✅ mark current on edit toggle
   };
 
   return (
-    <div className="flex items-center justify-between border-b border-gray-200 pb-1">
-      <div className="flex items-center space-x-2 w-full">
+    <div className="row-item flex items-center justify-between border-b border-gray-200 pb-1">
+      <div className="flex items-center space-x-2 w-full" onMouseDown={onFocusRow} onFocus={onFocusRow}>
         {/* ▶️ */}
         <button
           onClick={handlePlay}
@@ -309,24 +348,24 @@ function Row({ fileName, initialText, onSave, onDelete, onUpdated }) {
           {editing ? "✔️" : "✏️"}
         </button>
 
-        {/* ✅ Full-width Auto-expand Text Field */}
+        {/* ✅ 15ch-focused Text Field (auto-expands a bit while editing) */}
         <input
           type="text"
           value={val}
           readOnly={!editing}
           onChange={(e) => setVal(e.target.value)}
+          onFocus={onFocusRow}
           className={`border p-1 rounded text-sm truncate transition-all duration-300 ease-in-out ${
             editing ? "bg-white" : "bg-gray-100 cursor-default"
           } focus:ring focus:ring-blue-200 focus:outline-none overflow-x-auto`}
           style={{
             fontSize: "0.95rem",
-            flex: 1,                         // take remaining row space
-            maxWidth: "calc(100% - 90px)",   // leave room for icons + gaps
-            minWidth: "340px",               // ensure ~20–30 chars visible on small screens
+            flex: 1,
+            // ~15 characters visible baseline; expand modestly when editing
+            width: editing ? "clamp(220px, 18ch, 420px)" : "clamp(200px, 15ch, 360px)",
+            minWidth: "200px",
+            maxWidth: "calc(100% - 90px)",
             letterSpacing: "0.2px",
-            width: editing
-              ? "clamp(380px, 70ch, 640px)"  // grow a bit when editing
-              : "clamp(320px, 60ch, 560px)", // comfortable default width
           }}
         />
       </div>
