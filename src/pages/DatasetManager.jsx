@@ -378,3 +378,4 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
     </div>
   );
 }
+// Alert for Record
