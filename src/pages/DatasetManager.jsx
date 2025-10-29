@@ -1,7 +1,7 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.1.6 — Safe Delete Confirmation)
-// ✅ Adds confirmation alert before delete (OK / Cancel)
-// ✅ Cancel = no action; OK = proceeds to delete
+// 🎙️ DatasetManager.jsx (v4.1.7 — Safe Delete + Re-Record Confirmation)
+// ✅ Adds confirmation alerts before Delete & Re-Record
+// ✅ Cancel = no action; OK = proceeds
 // ✅ All other logic untouched
 // ===============================================
 
@@ -92,12 +92,12 @@ export default function DatasetManager() {
     }
   };
 
-  // 🧩 PATCH START — added confirmation
+  // 🧩 PATCH — Safe Delete Confirmation
   const deleteSample = async (file_name) => {
     const confirmDelete = window.confirm(
       `⚠️ Are you sure you want to delete "${file_name}"?\nThis action cannot be undone.`
     );
-    if (!confirmDelete) return; // user cancelled
+    if (!confirmDelete) return;
 
     const fd = new FormData();
     fd.append("file_name", file_name);
@@ -120,7 +120,6 @@ export default function DatasetManager() {
       showToast("⚠️ Delete failed.");
     }
   };
-  // 🧩 PATCH END
 
   useEffect(() => {
     fetchSamples();
@@ -234,7 +233,7 @@ export default function DatasetManager() {
   );
 }
 
-// 🎵 Row Component — unchanged
+// 🎵 Row Component
 function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocusRow }) {
   const [val, setVal] = useState(initialText || "");
   const [editing, setEditing] = useState(false);
@@ -266,13 +265,24 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
     }
   };
 
+  // 🧩 PATCH — Safe Re-Record Confirmation
   const handleRecord = async () => {
     if (editing) return;
+
+    // confirm only when starting new record (not stopping)
+    if (!isRecording) {
+      const confirmReRecord = window.confirm(
+        `🎙️ If you re-record, the previous recording for "${fileName}" will be overwritten.\nAre you sure you want to continue?`
+      );
+      if (!confirmReRecord) return;
+    }
+
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
       return;
     }
+
     try {
       onFocusRow?.();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
