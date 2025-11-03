@@ -1,7 +1,7 @@
 // ===============================================
-// 🎙️ DatasetManager.jsx (v4.1.7 — Safe Delete + Re-Record Confirmation)
-// ✅ Adds confirmation alerts before Delete & Re-Record
-// ✅ Cancel = no action; OK = proceeds
+// 🎙️ DatasetManager.jsx (v4.1.8 — Safe Download + Delete/Re-Record Confirmation)
+// ✅ Adds reliable ZIP download for Render + all browsers
+// ✅ Keeps Safe Delete + Re-Record confirmations
 // ✅ All other logic untouched
 // ===============================================
 
@@ -92,7 +92,7 @@ export default function DatasetManager() {
     }
   };
 
-  // 🧩 PATCH — Safe Delete Confirmation
+  // 🧩 Safe Delete Confirmation
   const deleteSample = async (file_name) => {
     const confirmDelete = window.confirm(
       `⚠️ Are you sure you want to delete "${file_name}"?\nThis action cannot be undone.`
@@ -129,12 +129,15 @@ export default function DatasetManager() {
     };
   }, []);
 
+  // =====================================================
+  // ⬇️ Fixed: Safe Unified Dataset Download (Render-safe)
+  // =====================================================
   const downloadDataset = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/dataset/export`, {
+      showToast("⏳ Preparing ZIP...");
+      const res = await axios.get(`${API_BASE}/dataset/export?_=${Date.now()}`, {
         responseType: "blob",
         headers: { "Cache-Control": "no-cache" },
-        params: { _: Date.now() },
       });
 
       const ct = (res.headers["content-type"] || "").toLowerCase();
@@ -144,18 +147,29 @@ export default function DatasetManager() {
         return;
       }
 
-      const url = URL.createObjectURL(res.data);
+      const blob = new Blob([res.data], { type: "application/zip" });
+      const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
+
       const cd = res.headers["content-disposition"] || "";
       const match = cd.match(/filename="?([^"]+)"?/i);
-      a.download = match?.[1] || "MongolianWhisper_Dataset.zip";
+      const filename =
+        match?.[1] ||
+        `MongolianWhisper_FullDataset_${new Date()
+          .toISOString()
+          .replace(/[:.]/g, "_")}.zip`;
+
+      a.download = filename;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
-      showToast("⬇️ Downloaded!");
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      showToast("✅ Download complete!");
     } catch (err) {
       console.error("❌ /dataset/export failed:", err);
-      showToast("⚠️ Download failed.");
+      showToast("⚠️ Download failed. Check backend or CORS.");
     }
   };
 
@@ -265,11 +279,9 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
     }
   };
 
-  // 🧩 PATCH — Safe Re-Record Confirmation
+  // 🧩 Safe Re-Record Confirmation
   const handleRecord = async () => {
     if (editing) return;
-
-    // confirm only when starting new record (not stopping)
     if (!isRecording) {
       const confirmReRecord = window.confirm(
         `🎙️ If you re-record, the previous recording for "${fileName}" will be overwritten.\nAre you sure you want to continue?`
@@ -378,4 +390,3 @@ function Row({ index, fileName, initialText, onSave, onDelete, onUpdated, onFocu
     </div>
   );
 }
-// Alert for Record
